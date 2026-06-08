@@ -383,6 +383,32 @@ static const struct cpcap_chip_data cpcap_mot_data = {
 	.num_devices = ARRAY_SIZE(cpcap_mot_mfd_devices),
 };
 
+static const struct mfd_cell cpcap_xoom_mfd_devices[] = {
+	{
+		.name          = "cpcap_adc",
+		.of_compatible = "motorola,xoom-cpcap-adc",
+	}, {
+		.name          = "cpcap_battery",
+		.of_compatible = "motorola,cpcap-battery",
+	}, {
+		.name          = "cpcap-regulator",
+		.of_compatible = "motorola,xoom-cpcap-regulator",
+	}, {
+		.name          = "cpcap-rtc",
+		.of_compatible = "motorola,cpcap-rtc",
+	}, {
+		.name          = "cpcap-pwrbutton",
+		.of_compatible = "motorola,cpcap-pwrbutton",
+	}, {
+		.name          = "cpcap-codec",
+	},
+};
+
+static const struct cpcap_chip_data cpcap_xoom_data = {
+	.mfd_devices = cpcap_xoom_mfd_devices,
+	.num_devices = ARRAY_SIZE(cpcap_xoom_mfd_devices),
+};
+
 static int cpcap_probe(struct spi_device *spi)
 {
 	struct cpcap_ddata *cpcap;
@@ -438,6 +464,7 @@ static const struct of_device_id cpcap_of_match[] = {
 	{ .compatible = "motorola,cpcap", .data = &cpcap_default_data },
 	{ .compatible = "motorola,mapphone-cpcap", .data = &cpcap_mapphone_data	},
 	{ .compatible = "motorola,mot-cpcap", .data = &cpcap_mot_data },
+	{ .compatible = "motorola,xoom-cpcap", .data = &cpcap_xoom_data },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, cpcap_of_match);
@@ -446,6 +473,7 @@ static const struct spi_device_id cpcap_spi_ids[] = {
 	{ .name = "cpcap", .driver_data = (kernel_ulong_t)&cpcap_default_data },
 	{ .name = "mapphone-cpcap", .driver_data = (kernel_ulong_t)&cpcap_mapphone_data },
 	{ .name = "mot-cpcap", .driver_data = (kernel_ulong_t)&cpcap_mot_data },
+	{ .name = "xoom-cpcap", .driver_data = (kernel_ulong_t)&cpcap_xoom_data },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(spi, cpcap_spi_ids);
