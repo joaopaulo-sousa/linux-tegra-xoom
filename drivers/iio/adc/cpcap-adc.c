@@ -945,6 +945,17 @@ static const struct cpcap_adc_ato mot_adc = {
 	.atox_ps_factor_out = 0,
 };
 
+static const struct cpcap_adc_ato xoom_adc = {
+	.ato_in = 0x0480,
+	.atox_in = 0,
+	.adc_ps_factor_in = 0x0200,
+	.atox_ps_factor_in = 0,
+	.ato_out = 0,
+	.atox_out = 0,
+	.adc_ps_factor_out = 0,
+	.atox_ps_factor_out = 0,
+};
+
 static const struct of_device_id cpcap_adc_id_table[] = {
 	{
 		.compatible = "motorola,cpcap-adc",
@@ -956,6 +967,10 @@ static const struct of_device_id cpcap_adc_id_table[] = {
 	{
 		.compatible = "motorola,mot-cpcap-adc",
 		.data = &mot_adc,
+	},
+	{
+		.compatible = "motorola,xoom-cpcap-adc",
+		.data = &xoom_adc,
 	},
 	{ }
 };
