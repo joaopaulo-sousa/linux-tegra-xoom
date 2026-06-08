@@ -15,11 +15,16 @@
 #include <linux/slab.h>
 #include <linux/regulator/max8649.h>
 #include <linux/regmap.h>
+#include <linux/of.h>
 
 #define MAX8649_DCDC_VMIN	750000		/* uV */
 #define MAX8649_DCDC_VMAX	1380000		/* uV */
 #define MAX8649_DCDC_STEP	10000		/* uV */
 #define MAX8649_VOL_MASK	0x3f
+
+#define MAX8952_DCDC_VMIN	770000		/* uV */
+#define MAX8952_DCDC_VMAX	1400000		/* uV */
+#define MAX8952_DCDC_STEP	10000		/* uV */
 
 /* Registers */
 #define MAX8649_MODE0		0x00
@@ -49,6 +54,7 @@
 struct max8649_regulator_info {
 	struct device		*dev;
 	struct regmap		*regmap;
+	struct regulator_desc	desc;
 
 	unsigned	mode:2;	/* bit[1:0] = VID1, VID0 */
 	unsigned	extclk_freq:2;
@@ -157,6 +163,24 @@ static int max8649_regulator_probe(struct i2c_client *client)
 	unsigned char data;
 	int ret;
 
+	info = devm_kzalloc(&client->dev, sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+	
+	info->desc = dcdc_desc;
+
+	if (of_device_is_compatible(np, "maxim,max8952-i2c")) {
+		info->desc.min_uV = MAX8952_DCDC_VMIN;
+		info->desc.uV_step = MAX8952_DCDC_STEP;
+		info->desc.name = "max8952";
+		dev_info(&client->dev, "Configuring regulator as MAX8952\n");
+	} else {
+		info->desc.min_uV = MAX8649_DCDC_VMIN;
+		info->desc.uV_step = MAX8649_DCDC_STEP;
+		info->desc.name = "max8649";
+		dev_info(&client->dev, "Configuring regulator as MAX8649\n");
+	}
+
 	if (!pdata && np) {
 		u32 mode;
         u32 ramp_timing;
@@ -178,7 +202,7 @@ static int max8649_regulator_probe(struct i2c_client *client)
 		pdata->extclk = of_property_read_bool(np, "maxim,extclk");
 		pdata->ramp_down = of_property_read_bool(np, "maxim,ramp-down");
 
-		pdata->regulator = of_get_regulator_init_data(&client->dev, np, &dcdc_desc);
+		pdata->regulator = of_get_regulator_init_data(&client->dev, np, &info->desc);
 
 		if (!pdata->regulator) {
 			dev_err(&client->dev, "Failed to parse regulator data from the device tree\n");
@@ -190,11 +214,6 @@ static int max8649_regulator_probe(struct i2c_client *client)
 		dev_err(&client->dev, "No platform data or device tree found\n");
 		return -EINVAL;
 	}
-
-	info = devm_kzalloc(&client->dev, sizeof(struct max8649_regulator_info),
-			    GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
 
 	info->regmap = devm_regmap_init_i2c(client, &max8649_regmap_config);
 	if (IS_ERR(info->regmap)) {
@@ -209,16 +228,16 @@ static int max8649_regulator_probe(struct i2c_client *client)
 	info->mode = pdata->mode;
 	switch (info->mode) {
 	case 0:
-		dcdc_desc.vsel_reg = MAX8649_MODE0;
+		info->desc.vsel_reg = MAX8649_MODE0;
 		break;
 	case 1:
-		dcdc_desc.vsel_reg = MAX8649_MODE1;
+		info->desc.vsel_reg = MAX8649_MODE1;
 		break;
 	case 2:
-		dcdc_desc.vsel_reg = MAX8649_MODE2;
+		info->desc.vsel_reg = MAX8649_MODE2;
 		break;
 	case 3:
-		dcdc_desc.vsel_reg = MAX8649_MODE3;
+		info->desc.vsel_reg = MAX8649_MODE3;
 		break;
 	default:
 		break;
@@ -238,7 +257,7 @@ static int max8649_regulator_probe(struct i2c_client *client)
 	/* enable/disable external clock synchronization */
 	info->extclk = pdata->extclk;
 	data = (info->extclk) ? MAX8649_SYNC_EXTCLK : 0;
-	regmap_update_bits(info->regmap, dcdc_desc.vsel_reg,
+	regmap_update_bits(info->regmap, info->desc.vsel_reg,
 			   MAX8649_SYNC_EXTCLK, data);
 	if (info->extclk) {
 		/* set external clock frequency */
@@ -265,11 +284,11 @@ static int max8649_regulator_probe(struct i2c_client *client)
 	config.regmap = info->regmap;
 	config.of_node = np;
 
-	regulator = devm_regulator_register(&client->dev, &dcdc_desc,
+	regulator = devm_regulator_register(&client->dev, &info->desc,
 						  &config);
 	if (IS_ERR(regulator)) {
 		dev_err(info->dev, "failed to register regulator %s\n",
-			dcdc_desc.name);
+			info->desc.name);
 		return PTR_ERR(regulator);
 	}
 
@@ -284,6 +303,7 @@ MODULE_DEVICE_TABLE(i2c, max8649_id);
 
 static const struct of_device_id max8649_dt_id[] = {
 	{ .compatible = "maxim,max8649" },
+	{ .compatible = "maxim,max8952-i2c" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, max8649_dt_id);
