@@ -11,6 +11,7 @@
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
+#include <linux/regulator/of_regulator.h>
 #include <linux/slab.h>
 #include <linux/regulator/max8649.h>
 #include <linux/regmap.h>
@@ -149,11 +150,46 @@ static int max8649_regulator_probe(struct i2c_client *client)
 {
 	struct max8649_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct max8649_regulator_info *info = NULL;
+	struct device_node *np = client->dev.of_node;
 	struct regulator_dev *regulator;
 	struct regulator_config config = { };
 	unsigned int val;
 	unsigned char data;
 	int ret;
+
+	if (!pdata && np) {
+		u32 mode;
+        u32 ramp_timing;
+
+		pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
+		if (!pdata)
+			return -ENOMEM;
+
+		if (of_property_read_u32(np, "maxim,mode", &mode))
+			pdata->mode = 0;
+        else
+            pdata->mode = mode;
+
+		if (of_property_read_u32(np, "maxim,ramp-timing", &ramp_timing))
+			pdata->ramp_timing = 0;
+        else
+            pdata->ramp_timing = ramp_timing;
+
+		pdata->extclk = of_property_read_bool(np, "maxim,extclk");
+		pdata->ramp_down = of_property_read_bool(np, "maxim,ramp-down");
+
+		pdata->regulator = of_get_regulator_init_data(&client->dev, np, &dcdc_desc);
+
+		if (!pdata->regulator) {
+			dev_err(&client->dev, "Failed to parse regulator data from the device tree\n");
+			return -EINVAL;
+		}
+	}
+
+	if (!pdata) {
+		dev_err(&client->dev, "No platform data or device tree found\n");
+		return -EINVAL;
+	}
 
 	info = devm_kzalloc(&client->dev, sizeof(struct max8649_regulator_info),
 			    GFP_KERNEL);
@@ -227,6 +263,7 @@ static int max8649_regulator_probe(struct i2c_client *client)
 	config.init_data = pdata->regulator;
 	config.driver_data = info;
 	config.regmap = info->regmap;
+	config.of_node = np;
 
 	regulator = devm_regulator_register(&client->dev, &dcdc_desc,
 						  &config);
@@ -245,11 +282,18 @@ static const struct i2c_device_id max8649_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, max8649_id);
 
+static const struct of_device_id max8649_dt_id[] = {
+	{ .compatible = "maxim,max8649" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, max8649_dt_id);
+
 static struct i2c_driver max8649_driver = {
 	.probe		= max8649_regulator_probe,
 	.driver		= {
 		.name	= "max8649",
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+		.of_match_table = max8649_dt_id,
 	},
 	.id_table	= max8649_id,
 };
