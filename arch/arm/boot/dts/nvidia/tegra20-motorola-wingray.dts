@@ -1,0 +1,1711 @@
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+
+#include <dt-bindings/input/atmel-maxtouch.h>
+#include <dt-bindings/input/gpio-keys.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/thermal/thermal.h>
+
+#include "tegra20.dtsi"
+#include "tegra20-cpu-opp.dtsi"
+#include "tegra20-cpu-opp-microvolt.dtsi"
+
+/ {
+	model = "Motorola Xoom (Wingray)";
+	compatible = "motorola,wingray", "motorola,xoom", "nvidia,tegra20";
+	chassis-type = "tablet";
+
+	aliases {
+		mmc0 = &sdmmc4; /* eMMC */
+		mmc1 = &sdmmc3; /* MicroSD Slot */
+		mmc2 = &sdmmc2; /* WiFi */
+
+		rtc0 = &cpcap_rtc;
+		rtc1 = "/rtc@7000e000";
+
+        serial0 = &uartb; /* Console */
+		serial1 = &uartc; /* Bluetooth */
+	};
+
+	/*
+	 * The decompressor and also some bootloaders rely on a
+	 * pre-existing /chosen node to be available to insert the
+	 * command line and merge other ATAGS info.
+	 */
+	chosen {};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x40000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops@1ff00000 {
+			compatible = "ramoops";
+			reg = <0x1ff00000 0x00100000>;
+			record-size = <0x00020000>;
+			console-size = <0x00020000>;
+			pmsg-size = <0x00020000>;
+		};
+
+		linux,cma {
+			compatible = "shared-dma-pool";
+			alloc-ranges = <0x30000000 0x10000000>;
+			size = <0x10000000>; /* 256MiB */
+			linux,cma-default;
+			reusable;
+		};
+	};
+
+	clk32k_in: clock-32k-in {
+		compatible = "fixed-clock";
+		clock-frequency = <32768>;
+		#clock-cells = <0>;
+	};
+
+	vdd_5v0_sys: regulator-5v0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_5v0";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+	vdd_3v3_sys: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		vin-supply = <&vdd_5v0_sys>;
+	};
+    vdd_1v8_sys: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		vin-supply = <&vdd_5v0_sys>;
+	};
+
+	/* 
+	 * This regulator (PB2) provides power to the panel and the I/O 
+	 * voltage for the I2C devices on the panel-end of the bus. It must be 
+	 * always-on so the I2C bus doesn't hang.
+	 */
+	reg_panel_vdd: regulator-panel {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_panel";
+		gpio = <&gpio TEGRA_GPIO(B, 2) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+    	startup-delay-us = <200000>;
+	};
+
+    reg_backlight_en: regulator-bl {
+		compatible = "regulator-fixed";
+		regulator-name = "backlight_en";
+		gpio = <&gpio TEGRA_GPIO(D, 0) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+
+	reg_usb_forceon: regulator-usb-forceon {
+        compatible = "regulator-fixed";
+        regulator-name = "usb_forceon";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        gpio = <&gpio TEGRA_GPIO(C, 5) GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        regulator-always-on;
+        regulator-boot-on;
+		vin-supply = <&vdd_3v3_sys>;
+    };
+
+	// OTG Power
+	reg_usb_vbus: regulator-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&gpio TEGRA_GPIO(T, 2) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&vdd_5v0_sys>;
+	};
+
+	reg_wifi_vdd: regulator-wifi {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_wifi";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio TEGRA_GPIO(U, 4) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		vin-supply = <&vdd_3v3_sys>;
+	};
+
+	gpio@6000d000 {
+        volume-buttons-hog {
+			gpio-hog;
+			gpios = <TEGRA_GPIO(Q, 0) GPIO_ACTIVE_HIGH>;
+			output-low;
+		};
+
+		usb-mux-hog {
+			gpio-hog;
+			gpios = <TEGRA_GPIO(V, 4) GPIO_ACTIVE_HIGH>;
+			output-high;
+		};
+        
+		spdif-mute-hog {
+			gpio-hog;
+			gpios = <TEGRA_GPIO(D, 4) GPIO_ACTIVE_HIGH>;
+			output-low;
+		};
+	};
+
+	gpio-poweroff {
+		compatible = "gpio-poweroff";
+		gpios = <&gpio TEGRA_GPIO(V, 7) GPIO_ACTIVE_LOW>;
+		timeout-ms = <500>;
+	};
+
+    gpio-restart {
+		compatible = "gpio-restart";
+		gpios = <&gpio TEGRA_GPIO(G, 3) GPIO_ACTIVE_LOW>;
+		priority = <200>;
+		active-delay = <100>;
+		inactive-delay = <100>;
+	};
+
+	gpio_keys {
+        compatible = "gpio-keys";
+        
+        volume_up {
+            label = "Volume Up";
+            gpios = <&gpio TEGRA_GPIO(R, 0) GPIO_ACTIVE_LOW>;
+            linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <10>;
+			wakeup-event-action = <EV_ACT_ASSERTED>;
+			wakeup-source;
+        };
+
+        volume_down {
+            label = "Volume Down";
+            gpios = <&gpio TEGRA_GPIO(R, 1) GPIO_ACTIVE_LOW>;
+            linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <10>;
+			wakeup-event-action = <EV_ACT_ASSERTED>;
+			wakeup-source;
+        };
+    };
+
+	// TODO: Sound is not working
+	sound {
+		compatible = "motorola,tegra-audio-cpcap-xoom",
+			"nvidia,tegra-audio-cpcap";
+        nvidia,model = "Motorola Xoom CPCAP";
+
+		nvidia,audio-routing =
+			"Headphones", "HSR",
+			"Headphones", "HSL",
+
+			"Int Spk", "SPKR",
+			"Int Spk", "SPKL",
+
+			"HSMIC", "Mic Jack",
+			"MICR", "Internal Mic 1",
+			"MICL", "Internal Mic 2";
+
+		nvidia,i2s-controller = <&tegra_i2s1>;
+		nvidia,audio-codec = <&cpcap_audio>;
+
+    	nvidia,spkr-en-gpios = <&gpio TEGRA_GPIO(R, 3) GPIO_ACTIVE_HIGH>;
+
+		clocks = <&tegra_car TEGRA20_CLK_PLL_A>,
+				<&tegra_car TEGRA20_CLK_PLL_A_OUT0>,
+				<&tegra_car TEGRA20_CLK_CDEV1>;
+		clock-names = "pll_a", "pll_a_out0", "mclk";
+	};
+
+	cpus {
+		cpu0: cpu@0 {
+			cpu-supply = <&vdd_cpu>;
+			operating-points-v2 = <&cpu0_opp_table>;
+			#cooling-cells = <2>;
+		};
+
+		cpu1: cpu@1 {
+			cpu-supply = <&vdd_cpu>;
+			operating-points-v2 = <&cpu0_opp_table>;
+			#cooling-cells = <2>;
+		};
+	};
+	
+	host1x@50000000 {
+		status = "okay";
+
+		dc@54200000 {
+			status = "okay";
+			rgb {
+				status = "okay";
+
+				port {
+					lcd_output: endpoint {
+						remote-endpoint = <&lvds_encoder_input>;
+						bus-width = <18>;
+					};
+				};
+			};
+		};
+	};
+
+	pinmux@70000014 {
+		pinctrl-names = "default";
+		pinctrl-0 = <&state_default>;
+
+		state_default: pinmux {
+			crt {
+				nvidia,pins = "crtp";
+				nvidia,function = "crt";
+			};
+
+			vi_sensor_clk {
+				nvidia,pins = "csus";
+				nvidia,function = "vi_sensor_clk";
+			};
+
+			dap1 {
+				nvidia,pins = "dap1";
+				nvidia,function = "dap1";
+			};
+			
+			dap2 {
+				nvidia,pins = "dap2";
+				nvidia,function = "dap2";
+			};
+
+			dap3 {
+				nvidia,pins = "dap3";
+				nvidia,function = "dap3";
+			};
+
+			dap4 {
+				nvidia,pins = "dap4";
+				nvidia,function = "dap4";
+			};
+
+			i2c2 {
+				nvidia,pins = "ddc";
+				nvidia,function = "i2c2";
+			};
+
+			vi {
+				nvidia,pins = "dtc", "dtd", "dte";
+				nvidia,function = "vi";
+			};
+
+			i2c3 {
+				nvidia,pins = "dtf";
+				nvidia,function = "i2c3";
+			};
+
+			sdio4 {
+				nvidia,pins = "atb", "gma", "gme";
+				nvidia,function = "sdio4";
+			};
+
+			uartd {
+				nvidia,pins = "gmc";
+				nvidia,function = "uartd";
+			};
+
+			pwm {
+				nvidia,pins = "gpu";
+				nvidia,function = "pwm";
+			};
+
+			rtck {
+				nvidia,pins = "gpu7";
+				nvidia,function = "rtck";
+			};
+
+			hdmi {
+				nvidia,pins = "hdint";
+				nvidia,function = "hdmi";
+			};
+
+			i2cp {
+				nvidia,pins = "i2cp";
+				nvidia,function = "i2cp";
+			};
+
+			uarta {
+				nvidia,pins = "irrx", "irtx";
+				nvidia,function = "uarta";
+			};
+
+			kbc {
+				nvidia,pins = "kbca", "kbcc";
+				nvidia,function = "kbc";
+			};
+
+			sdio2 {
+				nvidia,pins = "kbcb", "kbcd";
+				nvidia,function = "sdio2";
+			};
+
+			spi3 {
+				nvidia,pins = "lcsn", "lsck", "lsda", "lsdi";
+				nvidia,function = "spi3";
+			};
+
+			display {
+				nvidia,pins = "ld0", "ld1", "ld2", "ld3", "ld4", "ld5", 
+						"ld6", "ld7", "ld8", "ld9", "ld10", "ld11", 
+						"ld12", "ld13", "ld14", "ld15", "ld16", "ld17", 
+						"ldi", "lhp0", "lhp1", "lhp2", "lhs", "lpp", 
+						"lsc0", "lspi", "lvp1", "lvs";
+				nvidia,function = "displaya";
+			};
+
+			owr {
+				nvidia,pins = "owc";
+				nvidia,function = "owr";
+			};
+
+			pwr_on {
+				nvidia,pins = "pmc";
+				nvidia,function = "pwr_on";
+			};
+
+			sdio3 {
+				nvidia,pins = "sdb", "sdc", "sdd";
+				nvidia,function = "sdio3";
+			};
+
+			uarte {
+				nvidia,pins = "sdio1";
+				nvidia,function = "uarte";
+			};
+
+			spdif {
+				nvidia,pins = "slxd";
+				nvidia,function = "spdif";
+			};
+
+			i2c1 {
+				nvidia,pins = "spdi", "spdo";
+				nvidia,function = "i2c1";
+			};
+
+			spi2 {
+				nvidia,pins = "spia", "spib", "spic", "spig";
+				nvidia,function = "spi2";
+			};
+
+			spi1 {
+				nvidia,pins = "spid", "spie", "spif";
+				nvidia,function = "spi1";
+			};
+
+			ulpi {
+				nvidia,pins = "uaa", "uab", "uda";
+				nvidia,function = "ulpi";
+			};
+
+			irda {
+				nvidia,pins = "uad";
+				nvidia,function = "irda";
+			};
+
+			uartc {
+				nvidia,pins = "uca", "ucb";
+				nvidia,function = "uartc";
+			};
+
+			osc {
+				nvidia,pins = "cdev1", "cdev2";
+				nvidia,function = "osc";
+			};
+
+			rsvd1 {
+				nvidia,pins = "dta", "dtb", "gmd";
+				nvidia,function = "rsvd1";
+			};
+
+			rsvd2 {
+				nvidia,pins = "gpv", "rm", "uac";
+				nvidia,function = "rsvd2";
+			};
+
+			rsvd3 {
+				nvidia,pins = "ldc", "lm1", "lpw1", "lvp0";
+				nvidia,function = "rsvd3";
+			};
+
+			rsvd4 {
+				nvidia,pins = "ata", "ate", "kbce", "lm0", "pta";
+				nvidia,function = "rsvd4";
+			};
+
+			conf_pull_up: pull_up {
+				nvidia,pins = "atb", "atc", "atd", "ate", "dtf", "gmd", 
+						"kbca", "kbcb", "kbcc", "kbcd", "kbce", 
+						"kbcf", "owc", "sdio1", "uca", "ucb", "uad";
+				nvidia,pull = <TEGRA_PIN_PULL_UP>;
+			};
+
+			conf_pull_down: pull_down {
+				nvidia,pins = "ata", "csus", "dap1", "dap2", "dap3", 
+						"dap4", "dtb", "dtc", "dtd", "spic", "spig";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+			};
+
+			conf_pull_none: pull_none {
+				nvidia,pins = "cdev1", "cdev2", "crtp", "ddc", "dta", 
+						"dte", "gma", "gmb", "gmc", "gme", "gpu", 
+						"gpu7", "gpv", "i2cp", "irrx", "irtx", "pta", 
+						"rm", "sdc", "sdd", "slxa", "slxc", "slxd", 
+						"slxk", "spdi", "spdo", "spia", "spib", "spid", 
+						"spie", "spif", "spih", "uaa", "uab", "uac", 
+						"uda", "ck32", "ddrc", "pmca", "pmcb", "pmcc", 
+						"pmcd", "pmce", "xm2c", "xm2d";
+				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+			};
+			conf_tristate_en: tristate_on {
+				nvidia,pins = "ate", "crtp", "xm2c", "xm2d";
+				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+			};
+
+			conf_tristate_dis: tristate_off {
+				nvidia,pins = "ata", "atb", "atc", "atd", "cdev1", 
+						"cdev2", "csus", "dap1", "dap2", "dap3", 
+						"dap4", "ddc", "dta", "dtb", "dtc", "dtd", 
+						"dte", "dtf", "gma", "gmb", "gmc", "gmd", 
+						"gme", "gpu", "gpu7", "gpv", "hdint", "i2cp", 
+						"irrx", "irtx", "kbca", "kbcb", "kbcc", "kbcd", 
+						"kbce", "kbcf", "lcsn", "ld0", "ld1", "ld2", 
+						"ld3", "ld4", "ld5", "ld6", "ld7", "ld8", 
+						"ld9", "ld10", "ld11", "ld12", "ld13", "ld14", 
+						"ld15", "ld16", "ld17", "ldc", "ldi", "lhp0", 
+						"lhp1", "lhp2", "lhs", "lm0", "lm1", "lpp", 
+						"lpw0", "lpw1", "lpw2", "lsc0", "lsc1", "lsck", 
+						"lsda", "lsdi", "lspi", "lvp0", "lvp1", "lvs", 
+						"owc", "pmc", "pta", "rm", "sdb", "sdc", 
+						"sdd", "sdio1", "slxa", "slxc", "slxd", "slxk", 
+						"spdi", "spdo", "spia", "spib", "spic", "spid", 
+						"spie", "spif", "spig", "spih", "uaa", "uab", 
+						"uac", "uad", "uca", "ucb", "uda", "ck32", 
+						"ddrc", "pmca", "pmcb", "pmcc", "pmcd", "pmce";
+				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+			};
+		};
+
+		drive_default: drive {
+	        drive_ao1 {
+                nvidia,pins = "drive_ao1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_2>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_ao2 {
+                nvidia,pins = "drive_ao2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_at1 {
+                nvidia,pins = "drive_at1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_at2 {
+                nvidia,pins = "drive_at2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_cdev1 {
+                nvidia,pins = "drive_cdev1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_cdev2 {
+                nvidia,pins = "drive_cdev2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_csus {
+                nvidia,pins = "drive_csus";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_dap1 {
+                nvidia,pins = "drive_dap1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <0>;
+                nvidia,pull-up-strength = <0>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+            };
+
+            drive_dap2 {
+                nvidia,pins = "drive_dap2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_8>;
+                nvidia,pull-down-strength = <0>;
+                nvidia,pull-up-strength = <0>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+            };
+
+            drive_dap3 {
+                nvidia,pins = "drive_dap3";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_8>;
+                nvidia,pull-down-strength = <0>;
+                nvidia,pull-up-strength = <0>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+            };
+
+            drive_dap4 {
+                nvidia,pins = "drive_dap4";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_dbg {
+                nvidia,pins = "drive_dbg";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_2>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_ddc {
+                nvidia,pins = "drive_ddc";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_lcd1 {
+                nvidia,pins = "drive_lcd1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_lcd2 {
+                nvidia,pins = "drive_lcd2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_sdmmc2 {
+                nvidia,pins = "drive_sdmmc2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_sdmmc3 {
+                nvidia,pins = "drive_sdmmc3";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <20>;
+                nvidia,pull-up-strength = <16>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_spi {
+                nvidia,pins = "drive_spi";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_uaa {
+                nvidia,pins = "drive_uaa";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_uab {
+                nvidia,pins = "drive_uab";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_uart2 {
+                nvidia,pins = "drive_uart2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_uart3 {
+                nvidia,pins = "drive_uart3";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <18>;
+                nvidia,pull-up-strength = <22>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_vi1 {
+                nvidia,pins = "drive_vi1";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_vi2 {
+                nvidia,pins = "drive_vi2";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+            };
+
+            drive_xm2a {
+                nvidia,pins = "drive_xm2a";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_8>;
+                nvidia,pull-down-strength = <28>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FAST>;
+            };
+
+            drive_xm2c {
+                nvidia,pins = "drive_xm2c";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FAST>;
+            };
+
+            drive_xm2d {
+                nvidia,pins = "drive_xm2d";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_1>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FAST>;
+            };
+
+            drive_xm2clk {
+                nvidia,pins = "drive_xm2clk";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_DISABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_8>;
+                nvidia,pull-down-strength = <28>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_SLOWEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FAST>;
+            };
+
+            drive_memcomp {
+                nvidia,pins = "drive_memcomp";
+                nvidia,high-speed-mode = <TEGRA_PIN_DISABLE>;
+                nvidia,schmitt = <TEGRA_PIN_ENABLE>;
+                nvidia,low-power-mode = <TEGRA_PIN_LP_DRIVE_DIV_8>;
+                nvidia,pull-down-strength = <31>;
+                nvidia,pull-up-strength = <31>;
+                nvidia,slew-rate-rising = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+                nvidia,slew-rate-falling = <TEGRA_PIN_SLEW_RATE_FASTEST>;
+            };
+        };
+    };
+
+	tegra_i2s1: i2s@70002800 {
+		status = "okay";
+		nvidia,fixed-parent-rate;
+	};
+
+	lvds_encoder: lvds-encoder {
+		compatible = "ti,sn75lvds83", "lvds-encoder";
+
+		power-supply = <&reg_panel_vdd>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			port@0 {
+				reg = <0>;
+				lvds_encoder_input: endpoint {
+					remote-endpoint = <&lcd_output>;
+				};
+			};
+			port@1 {
+				reg = <1>;
+				lvds_encoder_output: endpoint {
+					remote-endpoint = <&panel_input>;
+				};
+			};
+		};
+	};
+
+	display-panel {
+		compatible = "panel-lvds";
+		data-mapping = "jeida-18";
+
+    	power-supply = <&reg_panel_vdd>;
+		backlight = <&backlight>;
+		
+		width-mm = <217>;
+		height-mm = <136>;
+
+		panel-timing {
+			clock-frequency = <66400000>;
+			hactive = <1280>;
+			vactive = <800>;
+			hfront-porch = <45>;
+			hback-porch = <12>;
+			hsync-len = <26>;
+			vfront-porch = <3>;
+			vback-porch = <3>;
+			vsync-len = <6>;
+		};
+
+		port {
+			panel_input: endpoint {
+				remote-endpoint = <&lvds_encoder_output>;
+			};
+		};
+	};
+
+	pwm@7000a000 {
+		status = "okay";
+	};
+
+	i2c@7000c000 {
+		status = "okay";
+		clock-frequency = <400000>;
+        
+		backlight: backlight@2c {
+			compatible = "ti,lp8550";
+			reg = <0x2c>;
+
+			power-supply = <&reg_panel_vdd>;
+            enable-supply = <&reg_backlight_en>;
+
+            /*
+			 * TODO: Figure out why PWM controls are not working,
+             * for now register-based control is done
+			 */
+            dev-ctrl = /bits/ 8 <0x05>;
+            init-brt = /bits/ 8 <0x80>;
+
+			rom-10h { rom-addr = /bits/ 8 <0x10>; rom-val = /bits/ 8 <0xa1>; };
+            rom-11h { rom-addr = /bits/ 8 <0x11>; rom-val = /bits/ 8 <0x67>; };
+            rom-12h { rom-addr = /bits/ 8 <0x12>; rom-val = /bits/ 8 <0xbf>; };
+            rom-13h { rom-addr = /bits/ 8 <0x13>; rom-val = /bits/ 8 <0x3f>; };
+            rom-14h { rom-addr = /bits/ 8 <0x14>; rom-val = /bits/ 8 <0x08>; };
+            rom-15h { rom-addr = /bits/ 8 <0x15>; rom-val = /bits/ 8 <0xea>; };
+            rom-16h { rom-addr = /bits/ 8 <0x16>; rom-val = /bits/ 8 <0x64>; };
+            rom-17h { rom-addr = /bits/ 8 <0x17>; rom-val = /bits/ 8 <0x2a>; };
+        };
+		
+		touchscreen@5b {
+			compatible = "atmel,maxtouch";
+			reg = <0x5b>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(V, 2) IRQ_TYPE_LEVEL_LOW>;
+                    
+            reset-gpios = <&gpio TEGRA_GPIO(R, 4) GPIO_ACTIVE_LOW>;
+            wake-gpios = <&gpio TEGRA_GPIO(J, 2) GPIO_ACTIVE_LOW>;
+
+            vdd-supply = <&reg_panel_vdd>;
+            avdd-supply = <&reg_panel_vdd>;
+		};
+	};
+
+	i2c@7000d000 {
+		status = "okay";
+		clock-frequency = <400000>;
+
+        magnetometer@c {
+			compatible = "asahi-kasei,ak8975";
+			reg = <0xc>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(Q, 2) IRQ_TYPE_EDGE_RISING>;
+
+			vdd-supply = <&vhvio>;
+		};
+
+		accelerometer@f {
+			compatible = "kionix,kxtf9";
+			reg = <0xf>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(V, 3) IRQ_TYPE_EDGE_RISING>;
+
+            mount-matrix = "-1",  "0",  "0",
+                           "0", "-1",  "0",
+                           "0",  "0", "-1";
+
+			vdd-supply = <&vhvio>;
+		};
+
+        nct1008: temperature-sensor@4c {
+			compatible = "onnn,nct1008";
+			reg = <0x4c>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(Q, 7) IRQ_TYPE_EDGE_FALLING>;
+
+			vcc-supply = <&vhvio>;
+			#thermal-sensor-cells = <1>;
+		};
+
+		vdd_cpu: regulator@60 {
+			compatible = "maxim,max8952-i2c";
+			reg = <0x60>;
+
+			maxim,mode = <1>;
+			maxim,ramp-timing = <0>;
+
+			regulator-name = "vdd_cpu";
+			regulator-min-microvolt = <770000>;
+			regulator-max-microvolt = <1400000>;
+			regulator-always-on;
+			regulator-boot-on;
+			
+			regulator-coupled-with = <&vdd_core &vdd_aon>;
+			regulator-coupled-max-spread = <550000 550000>;
+
+			nvidia,tegra-cpu-regulator;
+		};
+	};
+
+	battery: battery-cell {
+		status = "disabled";
+		
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion-polymer";
+
+		voltage-min-design-microvolt = <6800000>;
+		voltage-max-design-microvolt = <8400000>;
+    	voltage-nominal-design-microvolt = <7400000>;
+
+		charge-full-design-microamp-hours = <3250000>;
+		energy-full-design-microwatt-hours = <24050000>;
+
+		constant-charge-voltage-max-microvolt = <8400000>;
+		operating-range-celsius = <0 45>;
+	};
+
+	pmc@7000e400 {
+		nvidia,invert-interrupt;
+		nvidia,suspend-mode = <0>;
+		nvidia,cpu-pwr-good-time = <45776>;
+		nvidia,cpu-pwr-off-time = <31>;
+		nvidia,core-pwr-good-time = <3845 3845>;
+		nvidia,core-pwr-off-time = <458>;
+		nvidia,sys-clock-req-active-high;
+    	nvidia,core-power-req-active-high;
+		core-supply = <&vdd_core>;
+	};
+
+	spi@7000d600 {
+		status = "okay";
+		spi-max-frequency = <25000000>;
+
+		cpcap: pmic@0 {
+			compatible = "motorola,xoom-cpcap";
+			reg = <0>;
+
+			spi-cs-high;
+			spi-max-frequency = <10000000>;
+
+			interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>;
+
+			interrupt-controller;
+			#interrupt-cells = <2>;
+
+			cpcap_adc: adc {
+				compatible = "motorola,xoom-cpcap-adc";
+				
+				interrupts-extended = <&cpcap 8 IRQ_TYPE_NONE>;
+				interrupt-names = "adcdone";
+
+				#io-channel-cells = <1>;
+			};
+
+			cpcap_audio: audio-codec {
+				interrupts-extended = <&cpcap 9 IRQ_TYPE_NONE>,
+						      <&cpcap 10 IRQ_TYPE_NONE>;
+				interrupt-names = "hs", "mb2";
+
+				VAUDIO-supply = <&vaudio>;
+
+				#sound-dai-cells = <1>;
+			};
+
+			battery {
+				/*
+				 * The ADC is currently broken and returns -ETIMEOUT.
+				 * To prevent Linux from disabling the cpcap1-4 IRQ entirely,
+				 * we'll keep the ADC node itself enabled and just disable
+				 * the battery node.
+				 */
+				status = "disabled";
+				
+				compatible = "motorola,cpcap-battery";
+				interrupts = <6 IRQ_TYPE_NONE>, <5 IRQ_TYPE_NONE>,
+					     <3 IRQ_TYPE_NONE>, <20 IRQ_TYPE_NONE>,
+					     <54 IRQ_TYPE_NONE>, <57 IRQ_TYPE_NONE>;
+				interrupt-names =
+					"eol", "lowbph", "lowbpl",
+					"chrgcurr1", "battdetb", "cccal";
+				io-channels = <&cpcap_adc 0>, <&cpcap_adc 1>,
+					      <&cpcap_adc 5>, <&cpcap_adc 6>;
+				io-channel-names = "battdetb", "battp",
+						   "chg_isense", "batti";
+				monitored-battery = <&battery>;
+			};
+
+			cpcap_rtc: rtc {
+				compatible = "motorola,cpcap-rtc";
+				interrupt-parent = <&cpcap>;
+				interrupts = <39 IRQ_TYPE_NONE>, <26 IRQ_TYPE_NONE>;
+			};
+
+			/*
+			 * TODO: For some reason when the ADC is enabled,
+			 * the IRQ of the power button won't actually fire.
+			 */
+			key-power {
+				compatible = "motorola,cpcap-pwrbutton";
+
+				interrupt-parent = <&cpcap>;
+				interrupts = <23 IRQ_TYPE_NONE>;
+			};
+
+			cpcap_regulator: regulator {
+				compatible = "motorola,xoom-cpcap-regulator";
+				cpcap_regulators: regulators {
+					vdd_core: SW2 {
+						regulator-name = "vdd_core";
+						regulator-min-microvolt = <1000000>;
+						regulator-max-microvolt = <1450000>;
+						regulator-always-on;
+
+						regulator-coupled-with = <&vdd_aon &vdd_cpu>;
+						regulator-coupled-max-spread = <170000 550000>;
+
+						nvidia,tegra-core-regulator;
+					};
+
+					vdd_aon: SW4 {
+						regulator-name = "vdd_aon";
+						regulator-min-microvolt = <1000000>;
+						regulator-max-microvolt = <1450000>;
+						regulator-always-on;
+
+						regulator-coupled-with = <&vdd_core &vdd_cpu>;
+						regulator-coupled-max-spread = <170000 550000>;
+
+						nvidia,tegra-rtc-regulator;
+					};
+
+					vdd_led: SW5 {
+						regulator-name = "vdd_led";
+						regulator-min-microvolt = <5050000>;
+						regulator-max-microvolt = <5050000>;
+					};
+
+					vcam: VCAM {
+						regulator-name = "vcam";
+						regulator-min-microvolt = <2900000>;
+						regulator-max-microvolt = <2900000>;
+					};
+
+					vcsi: VCSI {
+						regulator-name = "vcsi";
+						regulator-min-microvolt = <1200000>;
+						regulator-max-microvolt = <1200000>;
+						regulator-boot-on;
+					};
+
+					vdac: VDAC {
+						regulator-name = "vdac";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+					};
+
+					vdig: VDIG {
+						regulator-name = "vdig";
+						regulator-min-microvolt = <1875000>;
+						regulator-max-microvolt = <1875000>;
+						regulator-always-on;
+					};
+
+					vfuse: VFUSE {
+						regulator-name = "vfuse";
+						regulator-min-microvolt = <1500000>;
+						regulator-max-microvolt = <3150000>;
+					};
+
+					vhvio: VHVIO {
+						regulator-name = "vhvio";
+						regulator-min-microvolt = <2775000>;
+						regulator-max-microvolt = <2775000>;
+						regulator-always-on;
+					};
+
+					vsdio: VSDIO {
+						regulator-name = "vsdio";
+						regulator-min-microvolt = <3000000>;
+						regulator-max-microvolt = <3000000>;
+						regulator-always-on;
+					};
+
+					vpll: VPLL {
+						regulator-name = "vpll";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+					};
+
+					vrf1: VRF1 {
+						regulator-name = "vrf1";
+						regulator-min-microvolt = <2500000>;
+						regulator-max-microvolt = <2775000>;
+					};
+
+					vrf2: VRF2 {
+						regulator-name = "vrf2";
+						regulator-min-microvolt = <2775000>;
+						regulator-max-microvolt = <2775000>;
+					};
+
+					vrfref: VRFREF {
+						regulator-name = "vrfref";
+						regulator-min-microvolt = <2500000>;
+						regulator-max-microvolt = <2775000>;
+					};
+
+					vwlan1: VWLAN1 {
+						regulator-name = "vwlan1";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1900000>;
+						regulator-always-on;
+					};
+
+					vwlan2: VWLAN2 {
+						regulator-name = "vwlan2";
+						regulator-min-microvolt = <3300000>;
+						regulator-max-microvolt = <3300000>;
+						regulator-always-on;
+					};
+
+					vsim: VSIM {
+						regulator-name = "vsim";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <2900000>;
+					};
+
+					vsimcard: VSIMCARD {
+						regulator-name = "vsimcard";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <2900000>;
+					};
+
+					vvib: VVIB {
+						regulator-name = "vvib";
+						regulator-min-microvolt = <1300000>;
+						regulator-max-microvolt = <3000000>;
+					};
+
+					vusb: VUSB {
+						regulator-name = "vusb";
+						regulator-min-microvolt = <3300000>;
+						regulator-max-microvolt = <3300000>;
+						regulator-boot-on;
+					};
+
+					vaudio: VAUDIO {
+						regulator-name = "vaudio";
+						regulator-min-microvolt = <2775000>;
+						regulator-max-microvolt = <2775000>;
+						regulator-always-on;
+						regulator-initial-mode = <0x00>;
+					};
+				};
+			};
+		};
+	};
+
+	usb@c5000000 {
+		compatible = "nvidia,tegra20-ehci"; 
+		status = "okay";
+		dr_mode = "otg";
+	};
+
+	usb-phy@c5000000 {
+		status = "okay";
+		dr_mode = "otg";
+		nvidia,xcvr-setup = <15>;
+		nvidia,xcvr-lsfslew = <2>;
+		nvidia,xcvr-lsrslew = <2>;
+		vbus-supply = <&reg_usb_vbus>;
+	};
+
+    uartc: serial@70006200 {
+		compatible = "nvidia,tegra20-hsuart";
+		reset-names = "serial";
+		/delete-property/ reg-shift;
+		status = "okay";
+
+		nvidia,adjust-baud-rates = <0 9600 100>,
+					   <9600 115200 200>,
+					   <1000000 4000000 136>;
+
+		bluetooth {
+			compatible = "brcm,bcm4329-bt";
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(U, 6) IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "host-wakeup";
+
+			/* PLLP 216MHz / 16 / 4 */
+			max-speed = <3375000>;
+
+			clocks = <&tegra_pmc TEGRA_PMC_CLK_BLINK>;
+			clock-names = "txco";
+
+			vbat-supply  = <&vdd_3v3_sys>;
+			vddio-supply = <&vwlan1>;
+
+			device-wakeup-gpios = <&gpio TEGRA_GPIO(U, 1) GPIO_ACTIVE_HIGH>;
+			shutdown-gpios = <&gpio TEGRA_GPIO(I, 7) GPIO_ACTIVE_HIGH>;
+			reset-gpios = <&gpio TEGRA_GPIO(U, 0) GPIO_ACTIVE_LOW>;
+		};
+	};
+
+    brcm_wifi_pwrseq: wifi-pwrseq {
+        compatible = "mmc-pwrseq-simple";
+
+        clocks = <&tegra_pmc TEGRA_PMC_CLK_BLINK>;
+        clock-names = "ext_clock";
+
+        reset-gpios = <&gpio TEGRA_GPIO(U, 2) GPIO_ACTIVE_LOW>;        
+        post-power-on-delay-ms = <300>;
+        power-off-delay-us = <200>;
+    };
+
+	/* WiFi */
+	sdmmc2: mmc@c8000200 {
+		status = "okay";
+		
+        #address-cells = <1>;
+		#size-cells = <0>;
+		
+        nvidia,default-tap = <6>;
+		nvidia,default-trim = <0>;
+
+        assigned-clocks = <&tegra_car TEGRA20_CLK_SDMMC2>;
+        assigned-clock-parents = <&tegra_car TEGRA20_CLK_PLL_M>;
+        assigned-clock-rates = <46153846>;
+        
+        /*
+		 * For some reason it won't run at 48MHz like downstream does
+         * For now, this messy number will do (600mHz / 15)
+		 */
+        max-frequency = <46153846>;
+		keep-power-in-suspend;
+        bus-width = <4>;
+		non-removable;
+
+        mmc-pwrseq = <&brcm_wifi_pwrseq>;
+        vmmc-supply = <&reg_wifi_vdd>;
+		vqmmc-supply = <&vwlan1>;
+
+		wifi@1 {
+			compatible = "brcm,bcm4329-fmac";
+			reg = <1>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(U, 5) IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "host-wake";
+		};
+	};
+
+	/* Internal eMMC */
+	sdmmc4: mmc@c8000600 {
+		status = "okay";
+		bus-width = <8>;
+		non-removable;
+		vmmc-supply = <&vsdio>;
+	};
+
+	/* MicroSD Card */
+	sdmmc3: mmc@c8000400 {
+		status = "okay";
+		bus-width = <4>;
+
+    	cd-gpios = <&gpio TEGRA_GPIO(I, 5) GPIO_ACTIVE_LOW>;
+        
+        nvidia,default-tap = <5>;
+		nvidia,default-trim = <0>;
+
+		vmmc-supply = <&vdd_3v3_sys>;
+		vqmmc-supply = <&vsdio>;
+	};
+
+    thermal-zones {
+		skin-thermal {
+			polling-delay-passive = <1000>; /* milliseconds */
+			polling-delay = <5000>; /* milliseconds */
+
+			thermal-sensors = <&nct1008 0>;
+
+			trips {
+				trip0: skin-alert {
+					/* throttle at 50C until temperature drops to 48C */
+					temperature = <50000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip1: skin-crit {
+					/* shut down at 62C */
+					temperature = <62000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&trip0>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cpu-thermal {
+			polling-delay-passive = <500>; /* milliseconds */
+			polling-delay = <1500>; /* milliseconds */
+
+			thermal-sensors = <&nct1008 1>;
+
+			trips {
+				trip2: cpu-alert {
+					/* throttle at 85C until temperature drops to 80C */
+					temperature = <85000>;
+					hysteresis = <5000>;
+					type = "passive";
+				};
+
+				trip3: cpu-crit {
+					/* shut down at 105C */
+					temperature = <105000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map1 {
+					trip = <&trip2>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+
+    memory-controller@7000f400 {
+		/*
+		 * TODO: Implement support for other RAM modules
+		 * Currently I just used the table from the Elpida 40nm
+		 * But downstream has the registers for the
+		 * Elpida 50nm and Samsung modules
+		 */
+		emc-table@25000 {
+			reg = <25000>;
+			compatible = "nvidia,tegra20-emc-table";
+			clock-frequency = <25000>;
+			nvidia,emc-registers = <
+				0x00000002   /* RC */
+				0x00000006   /* RFC */
+				0x00000003   /* RAS */
+				0x00000003   /* RP */
+				0x00000006   /* R2W */
+				0x00000004   /* W2R */
+				0x00000002   /* R2P */
+				0x00000009   /* W2P */
+				0x00000003   /* RD_RCD */
+				0x00000003   /* WR_RCD */
+				0x00000002   /* RRD */
+				0x00000002   /* REXT */
+				0x00000002   /* WDV */
+				0x00000004   /* QUSE */
+				0x00000003   /* QRST */
+				0x00000008   /* QSAFE */
+				0x0000000b   /* RDV */
+				0x0000004d   /* REFRESH */
+				0x00000000   /* BURST_REFRESH_NUM */
+				0x00000003   /* PDEX2WR */
+				0x00000003   /* PDEX2RD */
+				0x00000003   /* PCHG2PDEN */
+				0x00000008   /* ACT2PDEN */
+				0x00000001   /* AR2PDEN */
+				0x0000000a   /* RW2PDEN */
+				0x00000004   /* TXSR */
+				0x00000003   /* TCKE */
+				0x00000008   /* TFAW */
+				0x00000004   /* TRPAB */
+				0x00000006   /* TCLKSTABLE */
+				0x00000002   /* TCLKSTOP */
+				0x00000068   /* TREFBW */
+				0x00000000   /* QUSE_EXTRA */
+				0x00000003   /* FBIO_CFG6 */
+				0x00000000   /* ODT_WRITE */
+				0x00000000   /* ODT_READ */
+				0x00000282   /* FBIO_CFG5 */
+				0xa0ae04ae   /* CFG_DIG_DLL */
+				0x00070000   /* DLL_XFORM_DQS */
+				0x00000000   /* DLL_XFORM_QUSE */
+				0x00000000   /* ZCAL_REF_CNT */
+				0x00000003   /* ZCAL_WAIT_CNT */
+				0x00000000   /* AUTO_CAL_INTERVAL */
+				0x00000000   /* CFG_CLKTRIM_0 */
+				0x00000000   /* CFG_CLKTRIM_1 */
+				0x00000000   /* CFG_CLKTRIM_2 */
+			>;
+		};
+
+		emc-table@50000 {
+			reg = <50000>;
+			compatible = "nvidia,tegra20-emc-table";
+			clock-frequency = <50000>;
+			nvidia,emc-registers = <
+				0x00000003   /* RC */
+				0x00000007   /* RFC */
+				0x00000003   /* RAS */
+				0x00000003   /* RP */
+				0x00000006   /* R2W */
+				0x00000004   /* W2R */
+				0x00000002   /* R2P */
+				0x00000009   /* W2P */
+				0x00000003   /* RD_RCD */
+				0x00000003   /* WR_RCD */
+				0x00000002   /* RRD */
+				0x00000002   /* REXT */
+				0x00000002   /* WDV */
+				0x00000005   /* QUSE */
+				0x00000003   /* QRST */
+				0x00000008   /* QSAFE */
+				0x0000000b   /* RDV */
+				0x0000009f   /* REFRESH */
+				0x00000000   /* BURST_REFRESH_NUM */
+				0x00000003   /* PDEX2WR */
+				0x00000003   /* PDEX2RD */
+				0x00000003   /* PCHG2PDEN */
+				0x00000008   /* ACT2PDEN */
+				0x00000001   /* AR2PDEN */
+				0x0000000a   /* RW2PDEN */
+				0x00000007   /* TXSR */
+				0x00000003   /* TCKE */
+				0x00000008   /* TFAW */
+				0x00000004   /* TRPAB */
+				0x00000006   /* TCLKSTABLE */
+				0x00000002   /* TCLKSTOP */
+				0x000000d0   /* TREFBW */
+				0x00000000   /* QUSE_EXTRA */
+				0x00000000   /* FBIO_CFG6 */
+				0x00000000   /* ODT_WRITE */
+				0x00000000   /* ODT_READ */
+				0x00000282   /* FBIO_CFG5 */
+				0xa0ae04ae   /* CFG_DIG_DLL */
+				0x00070000   /* DLL_XFORM_DQS */
+				0x00000000   /* DLL_XFORM_QUSE */
+				0x00000000   /* ZCAL_REF_CNT */
+				0x00000005   /* ZCAL_WAIT_CNT */
+				0x00000000   /* AUTO_CAL_INTERVAL */
+				0x00000000   /* CFG_CLKTRIM_0 */
+				0x00000000   /* CFG_CLKTRIM_1 */
+				0x00000000   /* CFG_CLKTRIM_2 */
+			>;
+		};
+
+		emc-table@75000 {
+			reg = <75000>;
+			compatible = "nvidia,tegra20-emc-table";
+			clock-frequency = <75000>;
+			nvidia,emc-registers = <
+				0x00000005   /* RC */
+				0x0000000a   /* RFC */
+				0x00000004   /* RAS */
+				0x00000003   /* RP */
+				0x00000006   /* R2W */
+				0x00000004   /* W2R */
+				0x00000002   /* R2P */
+				0x00000009   /* W2P */
+				0x00000003   /* RD_RCD */
+				0x00000003   /* WR_RCD */
+				0x00000002   /* RRD */
+				0x00000002   /* REXT */
+				0x00000002   /* WDV */
+				0x00000005   /* QUSE */
+				0x00000003   /* QRST */
+				0x00000008   /* QSAFE */
+				0x0000000b   /* RDV */
+				0x000000ff   /* REFRESH */
+				0x00000000   /* BURST_REFRESH_NUM */
+				0x00000003   /* PDEX2WR */
+				0x00000003   /* PDEX2RD */
+				0x00000003   /* PCHG2PDEN */
+				0x00000008   /* ACT2PDEN */
+				0x00000001   /* AR2PDEN */
+				0x0000000a   /* RW2PDEN */
+				0x0000000b   /* TXSR */
+				0x00000003   /* TCKE */
+				0x00000008   /* TFAW */
+				0x00000004   /* TRPAB */
+				0x00000006   /* TCLKSTABLE */
+				0x00000002   /* TCLKSTOP */
+				0x00000138   /* TREFBW */
+				0x00000000   /* QUSE_EXTRA */
+				0x00000000   /* FBIO_CFG6 */
+				0x00000000   /* ODT_WRITE */
+				0x00000000   /* ODT_READ */
+				0x00000282   /* FBIO_CFG5 */
+				0xa0ae04ae   /* CFG_DIG_DLL */
+				0x00070000   /* DLL_XFORM_DQS */
+				0x00000000   /* DLL_XFORM_QUSE */
+				0x00000000   /* ZCAL_REF_CNT */
+				0x00000007   /* ZCAL_WAIT_CNT */
+				0x00000000   /* AUTO_CAL_INTERVAL */
+				0x00000000   /* CFG_CLKTRIM_0 */
+				0x00000000   /* CFG_CLKTRIM_1 */
+				0x00000000   /* CFG_CLKTRIM_2 */
+			>;
+		};
+
+		emc-table@150000 {
+			reg = <150000>;
+			compatible = "nvidia,tegra20-emc-table";
+			clock-frequency = <150000>;
+			nvidia,emc-registers = <
+				0x00000009   /* RC */
+				0x00000014   /* RFC */
+				0x00000007   /* RAS */
+				0x00000003   /* RP */
+				0x00000006   /* R2W */
+				0x00000004   /* W2R */
+				0x00000002   /* R2P */
+				0x00000009   /* W2P */
+				0x00000003   /* RD_RCD */
+				0x00000003   /* WR_RCD */
+				0x00000002   /* RRD */
+				0x00000002   /* REXT */
+				0x00000002   /* WDV */
+				0x00000005   /* QUSE */
+				0x00000003   /* QRST */
+				0x00000008   /* QSAFE */
+				0x0000000b   /* RDV */
+				0x0000021f   /* REFRESH */
+				0x00000000   /* BURST_REFRESH_NUM */
+				0x00000003   /* PDEX2WR */
+				0x00000003   /* PDEX2RD */
+				0x00000003   /* PCHG2PDEN */
+				0x00000008   /* ACT2PDEN */
+				0x00000001   /* AR2PDEN */
+				0x0000000a   /* RW2PDEN */
+				0x00000015   /* TXSR */
+				0x00000003   /* TCKE */
+				0x00000008   /* TFAW */
+				0x00000004   /* TRPAB */
+				0x00000006   /* TCLKSTABLE */
+				0x00000002   /* TCLKSTOP */
+				0x00000270   /* TREFBW */
+				0x00000000   /* QUSE_EXTRA */
+				0x00000001   /* FBIO_CFG6 */
+				0x00000000   /* ODT_WRITE */
+				0x00000000   /* ODT_READ */
+				0x00000282   /* FBIO_CFG5 */
+				0xa07c04ae   /* CFG_DIG_DLL */
+				0x007de010   /* DLL_XFORM_DQS */
+				0x00000000   /* DLL_XFORM_QUSE */
+				0x00000000   /* ZCAL_REF_CNT */
+				0x0000000e   /* ZCAL_WAIT_CNT */
+				0x00000000   /* AUTO_CAL_INTERVAL */
+				0x00000000   /* CFG_CLKTRIM_0 */
+				0x00000000   /* CFG_CLKTRIM_1 */
+				0x00000000   /* CFG_CLKTRIM_2 */
+			>;
+		};
+
+		emc-table@300000 {
+			reg = <300000>;
+			compatible = "nvidia,tegra20-emc-table";
+			clock-frequency = <300000>;
+			nvidia,emc-registers = <
+				0x00000012   /* RC */
+				0x00000027   /* RFC */
+				0x0000000d   /* RAS */
+				0x00000006   /* RP */
+				0x00000007   /* R2W */
+				0x00000005   /* W2R */
+				0x00000003   /* R2P */
+				0x00000009   /* W2P */
+				0x00000006   /* RD_RCD */
+				0x00000006   /* WR_RCD */
+				0x00000003   /* RRD */
+				0x00000003   /* REXT */
+				0x00000002   /* WDV */
+				0x00000006   /* QUSE */
+				0x00000003   /* QRST */
+				0x00000009   /* QSAFE */
+				0x0000000c   /* RDV */
+				0x0000045f   /* REFRESH */
+				0x00000000   /* BURST_REFRESH_NUM */
+				0x00000004   /* PDEX2WR */
+				0x00000004   /* PDEX2RD */
+				0x00000006   /* PCHG2PDEN */
+				0x00000008   /* ACT2PDEN */
+				0x00000001   /* AR2PDEN */
+				0x0000000e   /* RW2PDEN */
+				0x0000002a   /* TXSR */
+				0x00000003   /* TCKE */
+				0x0000000f   /* TFAW */
+				0x00000007   /* TRPAB */
+				0x00000005   /* TCLKSTABLE */
+				0x00000002   /* TCLKSTOP */
+				0x000004e0   /* TREFBW */
+				0x00000005   /* QUSE_EXTRA */
+				0x00000002   /* FBIO_CFG6 */
+				0x00000000   /* ODT_WRITE */
+				0x00000000   /* ODT_READ */
+				0x00000282   /* FBIO_CFG5 */
+				0xe059048b   /* CFG_DIG_DLL */
+				0x007e4010   /* DLL_XFORM_DQS */
+				0x00000000   /* DLL_XFORM_QUSE */
+				0x00000000   /* ZCAL_REF_CNT */
+				0x0000001b   /* ZCAL_WAIT_CNT */
+				0x00000000   /* AUTO_CAL_INTERVAL */
+				0x00000000   /* CFG_CLKTRIM_0 */
+				0x00000000   /* CFG_CLKTRIM_1 */
+				0x00000000   /* CFG_CLKTRIM_2 */
+			>;
+		};
+	};
+};
