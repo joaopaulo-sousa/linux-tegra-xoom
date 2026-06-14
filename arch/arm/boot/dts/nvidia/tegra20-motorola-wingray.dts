@@ -1251,14 +1251,15 @@
 	};
 
 	usb@c5000000 {
-		compatible = "nvidia,tegra20-ehci"; 
+		/* device-mode (chipidea UDC) for g_serial debug console */
+		compatible = "nvidia,tegra20-udc";
 		status = "okay";
-		dr_mode = "otg";
+		dr_mode = "peripheral";
 	};
 
 	usb-phy@c5000000 {
 		status = "okay";
-		dr_mode = "otg";
+		dr_mode = "peripheral";
 		nvidia,xcvr-setup = <15>;
 		nvidia,xcvr-lsfslew = <2>;
 		nvidia,xcvr-lsrslew = <2>;

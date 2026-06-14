@@ -82,7 +82,7 @@
  */
 #define QUEUE_SIZE		16
 #define WRITE_BUF_SIZE		8192		/* TX only */
-#define GS_CONSOLE_BUF_SIZE	8192
+#define GS_CONSOLE_BUF_SIZE	262144		/* Xoom: capture full early boot over g_serial */
 
 /* Prevents race conditions while accessing gser->ioport */
 static DEFINE_SPINLOCK(serial_port_lock);
