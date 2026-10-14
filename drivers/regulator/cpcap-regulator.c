@@ -575,7 +575,7 @@ static const struct cpcap_regulator xoom_regulators[] = {
 		  0x11c, 0x40, 0xc, 0, 0),
 	CPCAP_REG(VAUDIO, CPCAP_REG_VAUDIOC, CPCAP_REG_ASSIGN4,
 		  CPCAP_BIT_VAUDIO_SEL, vaudio_val_tbl,
-		  0x16, 0x1, 0x4, 0, 0),
+		  0x17, 0x1, 0x5, 0, 0),
 	{ /* sentinel */ },
 };
 
