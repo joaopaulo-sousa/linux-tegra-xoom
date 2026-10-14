@@ -214,8 +214,9 @@
 			"Headphones", "HSR",
 			"Headphones", "HSL",
 
-			"Int Spk", "SPKR",
-			"Int Spk", "SPKL",
+			/* external amp (spkr-en GPIO) is fed from CPCAP lineout */
+			"Int Spk", "LINER",
+			"Int Spk", "LINEL",
 
 			"HSMIC", "Mic Jack",
 			"MICR", "Internal Mic 1",
@@ -1009,7 +1010,6 @@
 	};
 
 	pmc@7000e400 {
-		nvidia,invert-interrupt;
 		nvidia,suspend-mode = <0>;
 		nvidia,cpu-pwr-good-time = <45776>;
 		nvidia,cpu-pwr-off-time = <31>;
@@ -1242,7 +1242,8 @@
 						regulator-name = "vaudio";
 						regulator-min-microvolt = <2775000>;
 						regulator-max-microvolt = <2775000>;
-						regulator-always-on;
+						regulator-enable-ramp-delay = <1000>;
+						regulator-allowed-modes = <0x00>, <0x40>;
 						regulator-initial-mode = <0x00>;
 					};
 				};
