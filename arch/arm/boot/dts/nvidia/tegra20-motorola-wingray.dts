@@ -1020,6 +1020,15 @@
 		core-supply = <&vdd_core>;
 	};
 
+	/* OWR 1-wire controller, connected to the DS2781 battery fuel gauge */
+	onewire@7000c600 {
+		compatible = "nvidia,tegra20-owr";
+		reg = <0x7000c600 0x50>;
+		interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&tegra_car TEGRA20_CLK_OWR>;
+		resets = <&tegra_car TEGRA20_CLK_OWR>;
+	};
+
 	spi@7000d600 {
 		status = "okay";
 		spi-max-frequency = <25000000>;
