@@ -362,7 +362,7 @@ const struct lpddr2_info
 	     cp = of_prop_next_string(prop, cp)) {
 
 #define OF_LPDDR2_VENDOR_CMP(compat, ID) \
-		if (!of_compat_cmp(cp, compat ",", strlen(compat ","))) { \
+		if (!strncasecmp(cp, compat ",", strlen(compat ","))) { \
 			info.manufacturer_id = LPDDR2_MANID_##ID; \
 			break; \
 		}
