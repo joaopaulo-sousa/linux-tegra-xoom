@@ -62,6 +62,18 @@ config W1_MASTER_GPIO
 	  This support is also available as a module.  If so, the module
 	  will be called w1-gpio.
 
+config W1_MASTER_TEGRA
+	tristate "NVIDIA Tegra20 OWR 1-wire busmaster"
+	depends on ARCH_TEGRA_2x_SOC || COMPILE_TEST
+	depends on HAS_IOMEM && COMMON_CLK
+	help
+	  Say Y here to enable the internal 1-wire (OWR) controller found
+	  on NVIDIA Tegra20 SoCs, used e.g. by the Motorola Xoom to talk
+	  to its DS2781 battery fuel gauge.
+
+	  This support is also available as a module.  If so, the module
+	  will be called tegra_w1.
+
 config HDQ_MASTER_OMAP
 	tristate "OMAP HDQ driver"
 	depends on ARCH_OMAP || COMPILE_TEST
