@@ -759,7 +759,11 @@ static int ds2781_battery_probe(struct platform_device *pdev)
 
 	dev_info->dev			= &pdev->dev;
 	dev_info->w1_dev		= pdev->dev.parent;
-	dev_info->bat_desc.name		= dev_name(&pdev->dev);
+	/* dev_name() ("ds2781-battery.N.auto") exceeds the thermal zone limit */
+	dev_info->bat_desc.name		= devm_kasprintf(&pdev->dev, GFP_KERNEL,
+							 "ds2781-%d", pdev->id);
+	if (!dev_info->bat_desc.name)
+		return -ENOMEM;
 	dev_info->bat_desc.type		= POWER_SUPPLY_TYPE_BATTERY;
 	dev_info->bat_desc.properties	= ds2781_battery_props;
 	dev_info->bat_desc.num_properties = ARRAY_SIZE(ds2781_battery_props);
