@@ -820,6 +820,14 @@ struct drm_tegra_channel_unmap {
  */
 #define DRM_TEGRA_SUBMIT_RELOC_SECTOR_LAYOUT (1 << 0)
 
+/**
+ * Specify that the job writes the buffer. The job's fence is then added to
+ * the buffer's reservation object as a write fence, so implicitly
+ * synchronized users (e.g. a display plane scanning the buffer out) wait
+ * for the job. Buffers without the flag get a read fence.
+ */
+#define DRM_TEGRA_SUBMIT_BUF_WRITE (1 << 1)
+
 struct drm_tegra_submit_buf {
 	/**
 	 * @mapping: [in]

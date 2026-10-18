@@ -3,6 +3,7 @@
 
 #include <linux/dma-fence-array.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-resv.h>
 #include <linux/file.h>
 #include <linux/host1x.h>
 #include <linux/iommu.h>
@@ -254,6 +255,38 @@ static int submit_write_reloc(struct tegra_drm_context *context, struct gather_b
 	return 0;
 }
 
+/*
+ * Add the job's fence to the reservation objects of the buffers it uses, as
+ * a write fence for those flagged DRM_TEGRA_SUBMIT_BUF_WRITE, so that e.g.
+ * the display waits for a frame before scanning it out.
+ */
+static void submit_add_resv_fences(struct tegra_drm_context *context,
+				   struct tegra_drm_submit_data *job_data,
+				   struct dma_fence *fence)
+{
+	u32 i;
+
+	for (i = 0; i < job_data->num_used_mappings; i++) {
+		struct tegra_drm_used_mapping *used = &job_data->used_mappings[i];
+		struct tegra_bo *bo = host1x_to_tegra_bo(used->mapping->bo);
+		struct dma_resv *resv = bo->gem.resv;
+		enum dma_resv_usage usage = DMA_RESV_USAGE_READ;
+		int err;
+
+		if (used->flags & DRM_TEGRA_SUBMIT_BUF_WRITE)
+			usage = DMA_RESV_USAGE_WRITE;
+
+		dma_resv_lock(resv, NULL);
+		err = dma_resv_reserve_fences(resv, 1);
+		if (!err)
+			dma_resv_add_fence(resv, fence, usage);
+		dma_resv_unlock(resv);
+
+		if (err)
+			SUBMIT_ERR(context, "failed to reserve fence slot: %d", err);
+	}
+}
+
 static int submit_process_bufs(struct tegra_drm_context *context, struct gather_bo *bo,
 			       struct drm_tegra_channel_submit *args,
 			       struct tegra_drm_submit_data *job_data)
@@ -281,7 +314,8 @@ static int submit_process_bufs(struct tegra_drm_context *context, struct gather_
 		struct drm_tegra_submit_buf *buf = &bufs[i];
 		struct tegra_drm_mapping *mapping;
 
-		if (buf->flags & ~DRM_TEGRA_SUBMIT_RELOC_SECTOR_LAYOUT) {
+		if (buf->flags & ~(DRM_TEGRA_SUBMIT_RELOC_SECTOR_LAYOUT |
+				   DRM_TEGRA_SUBMIT_BUF_WRITE)) {
 			SUBMIT_ERR(context, "invalid flag specified for buffer");
 			err = -EINVAL;
 			goto drop_refs;
@@ -511,7 +545,7 @@ int tegra_drm_ioctl_channel_submit(struct drm_device *drm, void *data,
 {
 	struct tegra_drm_file *fpriv = file->driver_priv;
 	struct drm_tegra_channel_submit *args = data;
-	struct tegra_drm_submit_data *job_data;
+	struct tegra_drm_submit_data *job_data, *used;
 	struct drm_syncobj *syncobj = NULL;
 	struct tegra_drm_context *context;
 	struct host1x_job *job;
@@ -633,6 +667,7 @@ int tegra_drm_ioctl_channel_submit(struct drm_device *drm, void *data,
 	 * job_data is now part of job reference counting, so don't release
 	 * it from here.
 	 */
+	used = job_data;
 	job_data = NULL;
 
 	/* Submit job to hardware. */
@@ -645,14 +680,18 @@ int tegra_drm_ioctl_channel_submit(struct drm_device *drm, void *data,
 	/* Return postfences to userspace and add fences to DMA reservations. */
 	args->syncpt.value = job->syncpt_end;
 
-	if (syncobj) {
+	if (syncobj || used->num_used_mappings) {
 		struct dma_fence *fence = host1x_fence_create(job->syncpt, job->syncpt_end, true);
 		if (IS_ERR(fence)) {
 			err = PTR_ERR(fence);
 			SUBMIT_ERR(context, "failed to create postfence: %d", err);
+		} else {
+			if (syncobj)
+				drm_syncobj_replace_fence(syncobj, fence);
+			submit_add_resv_fences(context, used, fence);
+			/* both take their own reference */
+			dma_fence_put(fence);
 		}
-
-		drm_syncobj_replace_fence(syncobj, fence);
 	}
 
 	goto put_job;
