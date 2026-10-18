@@ -400,6 +400,9 @@ static const struct mfd_cell cpcap_xoom_mfd_devices[] = {
 		.name          = "cpcap-pwrbutton",
 		.of_compatible = "motorola,cpcap-pwrbutton",
 	}, {
+		.name          = "cpcap-usb-extcon",
+		.of_compatible = "motorola,cpcap-usb-extcon",
+	}, {
 		.name          = "cpcap-codec",
 	},
 };

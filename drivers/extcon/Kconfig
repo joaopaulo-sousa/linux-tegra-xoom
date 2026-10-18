@@ -41,6 +41,14 @@ config EXTCON_FSA9480
 	  I2C and enables USB data, stereo and mono audio, video, microphone
 	  and UART data to use a common connector port.
 
+config EXTCON_CPCAP
+	tristate "Motorola CPCAP USB cable detection"
+	depends on MFD_CPCAP
+	help
+	  Say Y here to detect USB host (OTG adapter) and USB device cables
+	  through the Motorola CPCAP PMIC on Tegra20 based devices like the
+	  Motorola Xoom.
+
 config EXTCON_GPIO
 	tristate "GPIO extcon support"
 	depends on GPIOLIB || COMPILE_TEST
