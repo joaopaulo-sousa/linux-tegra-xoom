@@ -13,6 +13,7 @@
 #include <linux/iova.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/semaphore.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
@@ -102,7 +103,12 @@ struct tegra_vde {
 	void __iomem *vdma;
 	void __iomem *frameid;
 	struct device *dev;
-	struct mutex lock;
+	/*
+	 * Held from decode start to decode end, which runs in the completion
+	 * work, and across suspend/resume: a semaphore, as a mutex must be
+	 * released by its owner.
+	 */
+	struct semaphore lock;
 	struct mutex map_lock;
 	struct list_head map_list;
 	struct reset_control *rst;

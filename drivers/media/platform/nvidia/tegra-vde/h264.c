@@ -539,7 +539,7 @@ static int tegra_vde_decode_begin(struct tegra_vde *vde,
 	unsigned int macroblocks_nb;
 	int err;
 
-	err = mutex_lock_interruptible(&vde->lock);
+	err = down_interruptible(&vde->lock);
 	if (err)
 		return err;
 
@@ -588,7 +588,7 @@ put_runtime_pm:
 	pm_runtime_put_autosuspend(dev);
 
 unlock:
-	mutex_unlock(&vde->lock);
+	up(&vde->lock);
 
 	return err;
 }
@@ -613,7 +613,7 @@ static void tegra_vde_decode_abort(struct tegra_vde *vde)
 
 	pm_runtime_put_autosuspend(dev);
 
-	mutex_unlock(&vde->lock);
+	up(&vde->lock);
 }
 
 static int tegra_vde_decode_end(struct tegra_vde *vde)

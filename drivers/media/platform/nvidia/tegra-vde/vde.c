@@ -326,7 +326,7 @@ static int tegra_vde_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&vde->map_list);
 	mutex_init(&vde->map_lock);
-	mutex_init(&vde->lock);
+	sema_init(&vde->lock, 1);
 	init_completion(&vde->decode_completion);
 
 	err = tegra_vde_iommu_init(vde);
@@ -424,11 +424,13 @@ static __maybe_unused int tegra_vde_pm_suspend(struct device *dev)
 	struct tegra_vde *vde = dev_get_drvdata(dev);
 	int err;
 
-	mutex_lock(&vde->lock);
+	down(&vde->lock);
 
 	err = pm_runtime_force_suspend(dev);
-	if (err < 0)
+	if (err < 0) {
+		up(&vde->lock);
 		return err;
+	}
 
 	return 0;
 }
@@ -442,7 +444,7 @@ static __maybe_unused int tegra_vde_pm_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
-	mutex_unlock(&vde->lock);
+	up(&vde->lock);
 
 	return 0;
 }
