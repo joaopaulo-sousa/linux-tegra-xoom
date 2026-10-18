@@ -1104,6 +1104,15 @@
 				interrupts = <23 IRQ_TYPE_NONE>;
 			};
 
+			cpcap_usb_extcon: usb-extcon {
+				compatible = "motorola,cpcap-usb-extcon";
+
+				interrupt-parent = <&cpcap>;
+				interrupts = <15 IRQ_TYPE_NONE>, <14 IRQ_TYPE_NONE>,
+					     <19 IRQ_TYPE_NONE>;
+				interrupt-names = "id_ground", "id_float", "vbusvld";
+			};
+
 			cpcap_regulator: regulator {
 				compatible = "motorola,xoom-cpcap-regulator";
 				cpcap_regulators: regulators {
@@ -1260,20 +1269,25 @@
 		};
 	};
 
+	/* micro-USB: device mode on a PC, host mode with an OTG adapter */
 	usb@c5000000 {
-		/* device-mode (chipidea UDC) for g_serial debug console */
 		compatible = "nvidia,tegra20-udc";
 		status = "okay";
-		dr_mode = "peripheral";
+		dr_mode = "otg";
+		extcon = <&cpcap_usb_extcon>, <&cpcap_usb_extcon>;
+		/* switched by the controller, only in host mode */
+		vbus-supply = <&reg_usb_vbus>;
+		hnp-disable;
+		srp-disable;
+		adp-disable;
 	};
 
 	usb-phy@c5000000 {
 		status = "okay";
-		dr_mode = "peripheral";
+		dr_mode = "otg";
 		nvidia,xcvr-setup = <15>;
 		nvidia,xcvr-lsfslew = <2>;
 		nvidia,xcvr-lsrslew = <2>;
-		vbus-supply = <&reg_usb_vbus>;
 	};
 
     uartc: serial@70006200 {
