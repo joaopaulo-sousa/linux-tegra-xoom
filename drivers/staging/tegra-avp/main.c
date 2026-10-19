@@ -6,12 +6,14 @@
  * (/dev/tegra_sema), the memory handles (/dev/nvmap, /dev/knvmap) and the
  * AVP itself (/dev/tegra_avp: its kernel, the codec libraries it loads, the
  * services it asks of the CPU), and the host1x control node the libraries
- * also expect (/dev/nvhost-ctrl), which the NVIDIA multimedia libraries use.
+ * also expect (/dev/nvhost-ctrl), and the media server of the L4T tree
+ * (/dev/tegra_mediaserver), which the NVIDIA multimedia libraries use.
  */
 #include <linux/module.h>
 
 #include "avp.h"
 #include "nvhost_ctrl.h"
+#include "tegra_mediaserver.h"
 #include "trpc.h"
 
 static int __init tegra_avp_module_init(void)
@@ -35,8 +37,14 @@ static int __init tegra_avp_module_init(void)
 	if (ret)
 		goto err_avp;
 
+	ret = tegra_mediaserver_init();
+	if (ret)
+		goto err_mediasrv;
+
 	return 0;
 
+err_mediasrv:
+	tegra_avp_driver_unregister();
 err_avp:
 	tegra_nvhost_ctrl_exit();
 err_nvhost:
@@ -48,6 +56,7 @@ err_local:
 
 static void __exit tegra_avp_module_exit(void)
 {
+	tegra_mediaserver_exit();
 	tegra_avp_driver_unregister();
 	tegra_nvhost_ctrl_exit();
 	rpc_local_exit();
