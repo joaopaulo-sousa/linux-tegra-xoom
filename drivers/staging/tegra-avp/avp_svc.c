@@ -81,6 +81,8 @@ struct avp_svc_info {
 	/* the EMC rate follows the memory traffic (devfreq), the AVP's
 	 * included, so there is no sclk/emc clock to hold here */
 	struct avp_clk			clks[NUM_CLK_REQUESTS];
+	/* the system clock, which the AVP runs on: only reported */
+	struct clk			*sclk;
 
 	struct mutex			clk_lock;
 
@@ -366,6 +368,56 @@ send_response:
 		      sizeof(resp), GFP_KERNEL);
 }
 
+static void do_svc_unsupported(struct avp_svc_info *avp_svc, u32 svc_id)
+{
+	struct svc_common_resp resp;
+
+	resp.svc_id = svc_id;
+	resp.err = AVP_ERR_ENOTSUP;
+	trpc_send_msg(avp_svc->rpc_node, avp_svc->cpu_ep, &resp,
+		      sizeof(resp), GFP_KERNEL);
+}
+
+/*
+ * The L4T tree let the AVP set its own clock (sclk, with the EMC) and those
+ * of the engines it drives. Here these rates belong to the clock and
+ * devfreq drivers (sclk clocks the whole system bus, the engine rates go
+ * with the core voltage), so the AVP is told the actual rate instead.
+ */
+static unsigned long avp_module_rate(struct avp_svc_info *avp_svc, u32 id,
+				     bool *found)
+{
+	struct avp_module *mod = find_avp_module(avp_svc, id);
+
+	*found = mod || id == AVP_MODULE_ID_AVP;
+	if (!mod)
+		return id == AVP_MODULE_ID_AVP ? clk_get_rate(avp_svc->sclk) : 0;
+	return clk_get_rate(avp_svc->clks[mod->clk_req].clk);
+}
+
+static void do_svc_module_clock_rate(struct avp_svc_info *avp_svc,
+				     struct svc_msg *_msg, size_t len,
+				     u32 resp_svc_id)
+{
+	struct svc_clock_ctrl *msg = (struct svc_clock_ctrl *)_msg;
+	struct svc_clock_ctrl_response resp;
+	bool found;
+
+	resp.act_freq = avp_module_rate(avp_svc, msg->module_id, &found);
+	resp.err = found ? 0 : AVP_ERR_EINVAL;
+	if (!found)
+		pr_err("avp_svc: clock rate of unknown module %u\n",
+		       msg->module_id);
+	else if (resp_svc_id == SVC_MODULE_CLOCK_SET_RESPONSE)
+		pr_info_ratelimited("avp_svc: module %u asked for %u Hz, runs at %u Hz\n",
+				    msg->module_id, msg->clk_freq,
+				    resp.act_freq);
+
+	resp.svc_id = resp_svc_id;
+	trpc_send_msg(avp_svc->rpc_node, avp_svc->cpu_ep, &resp,
+		      sizeof(resp), GFP_KERNEL);
+}
+
 static void do_svc_null_response(struct avp_svc_info *avp_svc,
 				 struct svc_msg *_msg,
 				 size_t len, u32 resp_svc_id)
@@ -495,6 +547,16 @@ static int dispatch_svc_message(struct avp_svc_info *avp_svc,
 		DBG(AVP_DBG_TRACE_SVC, "%s: got module_clock\n", __func__);
 		do_svc_module_clock(avp_svc, msg, len);
 		break;
+	case SVC_MODULE_CLOCK_SET:
+		DBG(AVP_DBG_TRACE_SVC, "%s: got module_clock_set\n", __func__);
+		do_svc_module_clock_rate(avp_svc, msg, len,
+					 SVC_MODULE_CLOCK_SET_RESPONSE);
+		break;
+	case SVC_MODULE_CLOCK_GET:
+		DBG(AVP_DBG_TRACE_SVC, "%s: got module_clock_get\n", __func__);
+		do_svc_module_clock_rate(avp_svc, msg, len,
+					 SVC_MODULE_CLOCK_GET_RESPONSE);
+		break;
 	case SVC_DFS_GET_CLK_UTIL:
 		DBG(AVP_DBG_TRACE_SVC, "%s: got get_clk_util\n", __func__);
 		do_svc_dfs_get_clk_util(avp_svc, msg, len);
@@ -507,7 +569,9 @@ static int dispatch_svc_message(struct avp_svc_info *avp_svc,
 		pr_err("avp_svc: AVP has been reset by watchdog\n");
 		break;
 	default:
-		pr_err("avp_svc: invalid SVC call 0x%x\n", msg->svc_id);
+		/* answer, as the L4T tree does: the AVP waits for a reply */
+		pr_err("avp_svc: unsupported SVC call 0x%x\n", msg->svc_id);
+		do_svc_unsupported(avp_svc, msg->svc_id);
 		ret = -ENOMSG;
 		break;
 	}
@@ -669,6 +733,14 @@ struct avp_svc_info *avp_svc_init(struct platform_device *pdev,
 		}
 		aclk->mod = mod;
 		aclk->refcnt = 0;
+	}
+
+	/* not in the device tree: a clock lookup by name */
+	avp_svc->sclk = devm_clk_get(&pdev->dev, "sclk");
+	if (IS_ERR(avp_svc->sclk)) {
+		ret = PTR_ERR(avp_svc->sclk);
+		pr_err("avp_svc: couldn't get the system clock\n");
+		goto err_get_clks;
 	}
 
 	avp_svc->rpc_node = rpc_node;
