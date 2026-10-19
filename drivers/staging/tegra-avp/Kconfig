@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config TEGRA_AVP_STAGING
+	tristate "NVIDIA Tegra20 AVP multimedia offload"
+	depends on ARCH_TEGRA_2x_SOC || COMPILE_TEST
+	depends on TEGRA_HOST1X
+	select FW_LOADER
+	select SRAM
+	help
+	  Interfaces of the NVIDIA/Android 2.6.39 and L4T trees used by the
+	  NVIDIA (L4T) multimedia libraries to run codecs on the Tegra20 AVP
+	  coprocessor: /dev/tegra_avp, /dev/tegra_rpc, /dev/tegra_sema,
+	  /dev/nvmap, /dev/knvmap and /dev/nvhost-ctrl. The AVP drives the
+	  VDE, so the tegra-vde driver must not be bound at the same time.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called tegra-avp.
