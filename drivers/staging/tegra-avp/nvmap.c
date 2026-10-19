@@ -7,30 +7,29 @@
  * The original manages carveouts, the Tegra20 GART and page pools. Here
  * every handle is one physically contiguous allocation from CMA, which is
  * what the AVP and the engines it drives need to see anyway: pinning a
- * handle just reports its address. Memory is write-combined for the CPU,
- * which makes the cache maintenance requests no-ops.
+ * handle just reports its address. Allocations asking for IRAM only come
+ * from the IRAM pool. Memory is write-combined for the CPU, which makes the
+ * cache maintenance requests no-ops.
  *
  * Handles are named by a global id, which is also what a client calls the
  * handle in its ioctls (the original used the kernel pointer for both).
  * Another client gets a reference by id once the owner published it
- * (NVMAP_IOC_GET_ID), or always through /dev/knvmap.
+ * (NVMAP_IOC_GET_ID), or always through /dev/knvmap and in the kernel.
  */
 #include <linux/dma-direct.h>
 #include <linux/dma-mapping.h>
 #include <linux/fs.h>
+#include <linux/genalloc.h>
 #include <linux/kref.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
-#include <linux/platform_device.h>
 #include <linux/refcount.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/xarray.h>
 
 #include "nvmap.h"
-
-struct nvmap_client;
 
 struct nvmap_handle {
 	struct kref kref;
@@ -39,9 +38,11 @@ struct nvmap_handle {
 	size_t orig_size;		/* as asked for */
 	struct mutex lock;		/* allocation */
 	bool alloc;
+	bool iram;
 	unsigned int flags;
 	void *vaddr;
-	dma_addr_t dma;
+	dma_addr_t dma;			/* for freeing */
+	phys_addr_t phys;		/* what the engines see (no IOMMU) */
 	atomic_t pin;
 	struct nvmap_client *owner;	/* compared only, may be gone */
 	bool global;			/* the owner published the id */
@@ -57,7 +58,7 @@ struct nvmap_ref {
 struct nvmap_client {
 	struct xarray refs;		/* id -> struct nvmap_ref */
 	struct mutex lock;
-	bool super;			/* /dev/knvmap: any id */
+	bool super;			/* knvmap and the kernel: any id */
 };
 
 struct nvmap_vma_priv {
@@ -66,7 +67,8 @@ struct nvmap_vma_priv {
 	unsigned long offs;
 };
 
-static struct platform_device *nvmap_pdev;
+static struct device *nvmap_dev;
+static struct gen_pool *nvmap_iram;
 static DEFINE_XARRAY_ALLOC1(nvmap_handles);
 static const struct vm_operations_struct nvmap_vma_ops;
 static struct miscdevice nvmap_knvmap_dev;
@@ -76,8 +78,10 @@ static void nvmap_handle_release(struct kref *kref)
 	struct nvmap_handle *h = container_of(kref, struct nvmap_handle, kref);
 
 	xa_erase(&nvmap_handles, h->id);
-	if (h->alloc)
-		dma_free_wc(&nvmap_pdev->dev, h->size, h->vaddr, h->dma);
+	if (h->alloc && h->iram)
+		gen_pool_free(nvmap_iram, (unsigned long)h->vaddr, h->size);
+	else if (h->alloc)
+		dma_free_wc(nvmap_dev, h->size, h->vaddr, h->dma);
 	kfree(h);
 }
 
@@ -103,7 +107,8 @@ static struct nvmap_handle *nvmap_client_handle(struct nvmap_client *client,
 	return h;
 }
 
-/* Give the client a reference to h, taking over the caller's one */
+/* Give the client a reference to h, taking over the caller's one; on
+ * failure the caller keeps it */
 static int nvmap_client_add(struct nvmap_client *client, struct nvmap_handle *h)
 {
 	struct nvmap_ref *ref;
@@ -117,7 +122,6 @@ static int nvmap_client_add(struct nvmap_client *client, struct nvmap_handle *h)
 		goto out;
 	}
 
-	/* on failure the caller keeps its reference */
 	ref = kzalloc(sizeof(*ref), GFP_KERNEL);
 	if (!ref) {
 		err = -ENOMEM;
@@ -140,58 +144,85 @@ static void nvmap_ref_drop(struct nvmap_ref *ref)
 	kfree(ref);
 }
 
-static int nvmap_ioctl_create(struct nvmap_client *client, unsigned int cmd,
-			      void __user *arg)
+struct nvmap_client *nvmap_client_create(void)
 {
-	struct nvmap_create_handle op;
+	struct nvmap_client *client;
+
+	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	if (!client)
+		return NULL;
+	xa_init(&client->refs);
+	mutex_init(&client->lock);
+	client->super = true;
+	return client;
+}
+
+void nvmap_client_destroy(struct nvmap_client *client)
+{
+	struct nvmap_ref *ref;
+	unsigned long id;
+
+	xa_for_each(&client->refs, id, ref)
+		nvmap_ref_drop(ref);
+	xa_destroy(&client->refs);
+	kfree(client);
+}
+
+int nvmap_handle_create(struct nvmap_client *client, size_t size, u32 *id)
+{
 	struct nvmap_handle *h;
 	int err;
 
-	if (copy_from_user(&op, arg, sizeof(op)))
-		return -EFAULT;
+	if (!size)
+		return -EINVAL;
+	h = kzalloc(sizeof(*h), GFP_KERNEL);
+	if (!h)
+		return -ENOMEM;
+	kref_init(&h->kref);
+	mutex_init(&h->lock);
+	h->size = PAGE_ALIGN(size);
+	h->orig_size = size;
+	h->owner = client;
 
-	if (cmd == NVMAP_IOC_CREATE) {
-		if (!op.size)
-			return -EINVAL;
-		h = kzalloc(sizeof(*h), GFP_KERNEL);
-		if (!h)
-			return -ENOMEM;
-		kref_init(&h->kref);
-		mutex_init(&h->lock);
-		h->size = PAGE_ALIGN(op.size);
-		h->orig_size = op.size;
-		h->owner = client;
-		err = xa_alloc(&nvmap_handles, &h->id, h, xa_limit_32b, GFP_KERNEL);
-		if (err) {
-			kfree(h);
-			return err;
-		}
-	} else {
-		/* NVMAP_IOC_FROM_ID */
-		xa_lock(&nvmap_handles);
-		h = xa_load(&nvmap_handles, op.id);
-		if (h && !kref_get_unless_zero(&h->kref))
-			h = NULL;
-		xa_unlock(&nvmap_handles);
-		if (!h)
-			return -EPERM;
-		if (!h->global && !client->super && h->owner != client) {
-			nvmap_handle_put(h);
-			return -EPERM;
-		}
+	err = xa_alloc(&nvmap_handles, &h->id, h, xa_limit_32b, GFP_KERNEL);
+	if (err) {
+		kfree(h);
+		return err;
 	}
-
-	op.handle = h->id;
 	err = nvmap_client_add(client, h);
 	if (err) {
 		nvmap_handle_put(h);
 		return err;
 	}
-
-	return copy_to_user(arg, &op, sizeof(op)) ? -EFAULT : 0;
+	*id = h->id;
+	return 0;
 }
 
-static int nvmap_ioctl_free(struct nvmap_client *client, u32 id)
+/* NVMAP_IOC_FROM_ID: another reference, if the id is visible to the client */
+int nvmap_handle_dup(struct nvmap_client *client, u32 id)
+{
+	struct nvmap_handle *h;
+	int err;
+
+	xa_lock(&nvmap_handles);
+	h = xa_load(&nvmap_handles, id);
+	if (h && !kref_get_unless_zero(&h->kref))
+		h = NULL;
+	xa_unlock(&nvmap_handles);
+	if (!h)
+		return -EPERM;
+	if (!h->global && !client->super && h->owner != client) {
+		nvmap_handle_put(h);
+		return -EPERM;
+	}
+
+	err = nvmap_client_add(client, h);
+	if (err)
+		nvmap_handle_put(h);
+	return err;
+}
+
+void nvmap_handle_free(struct nvmap_client *client, u32 id)
 {
 	struct nvmap_ref *ref;
 
@@ -202,47 +233,163 @@ static int nvmap_ioctl_free(struct nvmap_client *client, u32 id)
 		nvmap_ref_drop(ref);
 	}
 	mutex_unlock(&client->lock);
+}
+
+static int nvmap_alloc_iram(struct nvmap_handle *h)
+{
+	if (!nvmap_iram)
+		return -ENOMEM;
+	h->vaddr = gen_pool_dma_alloc(nvmap_iram, h->size, &h->dma);
+	if (!h->vaddr)
+		return -ENOMEM;
+	h->phys = gen_pool_virt_to_phys(nvmap_iram, (unsigned long)h->vaddr);
+	h->iram = true;
+	return 0;
+}
+
+static int nvmap_alloc_dram(struct nvmap_handle *h)
+{
+	h->vaddr = dma_alloc_wc(nvmap_dev, h->size, &h->dma, GFP_KERNEL);
+	if (!h->vaddr)
+		return -ENOMEM;
+	h->phys = dma_to_phys(nvmap_dev, h->dma);
+	return 0;
+}
+
+int nvmap_handle_alloc(struct nvmap_client *client, u32 id,
+		       unsigned int heap_mask, size_t align, unsigned int flags)
+{
+	struct nvmap_handle *h;
+	int err = 0;
+
+	if (align & (align - 1))
+		return -EINVAL;
+
+	h = nvmap_client_handle(client, id);
+	if (!h)
+		return -EPERM;
+
+	mutex_lock(&h->lock);
+	if (h->alloc)
+		goto out;
+
+	/* CMA hands out blocks aligned to their order, which covers the
+	 * alignments asked for (page to the AVP kernel's 1 MiB) */
+	if (align > (PAGE_SIZE << get_order(h->size)))
+		dev_warn(nvmap_dev, "alignment %zu for %zu bytes\n", align, h->size);
+
+	if (heap_mask & ~NVMAP_HEAP_CARVEOUT_IRAM) {
+		err = nvmap_alloc_dram(h);
+		if (err && (heap_mask & NVMAP_HEAP_CARVEOUT_IRAM))
+			err = nvmap_alloc_iram(h);
+	} else if (heap_mask & NVMAP_HEAP_CARVEOUT_IRAM) {
+		err = nvmap_alloc_iram(h);
+	} else {
+		err = -EINVAL;
+	}
+	if (!err) {
+		h->flags = flags;
+		h->alloc = true;
+	}
+out:
+	mutex_unlock(&h->lock);
+	nvmap_handle_put(h);
+	return err;
+}
+
+int nvmap_handle_pin(struct nvmap_client *client, u32 id, dma_addr_t *addr)
+{
+	struct nvmap_ref *ref;
+	int err = 0;
+
+	mutex_lock(&client->lock);
+	ref = xa_load(&client->refs, id);
+	if (!ref || !ref->h->alloc) {
+		err = -EPERM;
+	} else {
+		ref->pins++;
+		atomic_inc(&ref->h->pin);
+		*addr = ref->h->phys;
+	}
+	mutex_unlock(&client->lock);
+	return err;
+}
+
+void nvmap_handle_unpin(struct nvmap_client *client, u32 id)
+{
+	struct nvmap_ref *ref;
+
+	mutex_lock(&client->lock);
+	ref = xa_load(&client->refs, id);
+	if (ref && ref->pins) {
+		ref->pins--;
+		atomic_dec(&ref->h->pin);
+	}
+	mutex_unlock(&client->lock);
+}
+
+dma_addr_t nvmap_handle_address(struct nvmap_client *client, u32 id)
+{
+	struct nvmap_handle *h = nvmap_client_handle(client, id);
+	dma_addr_t addr = DMA_MAPPING_ERROR;
+
+	if (h) {
+		if (h->alloc)
+			addr = h->phys;
+		nvmap_handle_put(h);
+	}
+	return addr;
+}
+
+void *nvmap_handle_vaddr(struct nvmap_client *client, u32 id)
+{
+	struct nvmap_handle *h = nvmap_client_handle(client, id);
+	void *vaddr = NULL;
+
+	/* the client's reference keeps the memory */
+	if (h) {
+		if (h->alloc)
+			vaddr = h->vaddr;
+		nvmap_handle_put(h);
+	}
+	return vaddr;
+}
+
+static int nvmap_ioctl_create(struct nvmap_client *client, unsigned int cmd,
+			      void __user *arg)
+{
+	struct nvmap_create_handle op;
+	int err;
+
+	if (copy_from_user(&op, arg, sizeof(op)))
+		return -EFAULT;
+
+	if (cmd == NVMAP_IOC_CREATE) {
+		err = nvmap_handle_create(client, op.size, &op.handle);
+	} else {
+		/* NVMAP_IOC_FROM_ID */
+		err = nvmap_handle_dup(client, op.id);
+		op.handle = op.id;
+	}
+	if (err)
+		return err;
+
+	if (copy_to_user(arg, &op, sizeof(op))) {
+		nvmap_handle_free(client, op.handle);
+		return -EFAULT;
+	}
 	return 0;
 }
 
 static int nvmap_ioctl_alloc(struct nvmap_client *client, void __user *arg)
 {
 	struct nvmap_alloc_handle op;
-	struct nvmap_handle *h;
-	int err = 0;
 
 	if (copy_from_user(&op, arg, sizeof(op)))
 		return -EFAULT;
-	if (op.align & (op.align - 1))
-		return -EINVAL;
-	/* every heap is contiguous memory here, but IRAM is not offered */
-	if (!(op.heap_mask & ~NVMAP_HEAP_CARVEOUT_IRAM))
-		return -ENOMEM;
-
-	h = nvmap_client_handle(client, op.handle);
-	if (!h)
-		return -EPERM;
-
-	mutex_lock(&h->lock);
-	if (!h->alloc) {
-		/* CMA hands out blocks aligned to their order, which covers
-		 * the alignments asked for (page to a few hundred KiB) */
-		if (op.align > (PAGE_SIZE << get_order(h->size)))
-			dev_warn(&nvmap_pdev->dev, "alignment %u for %zu bytes\n",
-				 op.align, h->size);
-		h->vaddr = dma_alloc_wc(&nvmap_pdev->dev, h->size, &h->dma,
-					GFP_KERNEL);
-		if (h->vaddr) {
-			h->flags = op.flags;
-			h->alloc = true;
-		} else {
-			err = -ENOMEM;
-		}
-	}
-	mutex_unlock(&h->lock);
-
-	nvmap_handle_put(h);
-	return err;
+	/* user space handles are page aligned, to prevent data leakage */
+	return nvmap_handle_alloc(client, op.handle, op.heap_mask,
+				  max_t(size_t, op.align, PAGE_SIZE), op.flags);
 }
 
 static int nvmap_ioctl_getid(struct nvmap_client *client, void __user *arg)
@@ -285,10 +432,11 @@ static int nvmap_ioctl_param(struct nvmap_client *client, void __user *arg)
 		op.result = h->alloc ? PAGE_SIZE : 0;
 		break;
 	case NVMAP_HANDLE_PARAM_BASE:
-		op.result = h->alloc && atomic_read(&h->pin) ? h->dma : -1ul;
+		op.result = h->alloc && atomic_read(&h->pin) ? h->phys : -1ul;
 		break;
 	case NVMAP_HANDLE_PARAM_HEAP:
-		op.result = h->alloc ? NVMAP_HEAP_CARVEOUT_GENERIC : 0;
+		op.result = !h->alloc ? 0 : h->iram ? NVMAP_HEAP_CARVEOUT_IRAM :
+			    NVMAP_HEAP_CARVEOUT_GENERIC;
 		break;
 	default:
 		err = -EINVAL;
@@ -300,48 +448,14 @@ static int nvmap_ioctl_param(struct nvmap_client *client, void __user *arg)
 	return err;
 }
 
-/* Pin or unpin "count" of the client's handles; pinning reports addresses */
-static int nvmap_pin_ids(struct nvmap_client *client, bool pin, u32 *ids,
-			 unsigned int count, unsigned long *addrs)
-{
-	unsigned int i;
-	int err = 0;
-
-	mutex_lock(&client->lock);
-	for (i = 0; i < count; i++) {
-		struct nvmap_ref *ref = xa_load(&client->refs, ids[i]);
-
-		if (!ref || (pin && !ref->h->alloc)) {
-			err = -EPERM;
-			break;
-		}
-		if (pin) {
-			ref->pins++;
-			atomic_inc(&ref->h->pin);
-			addrs[i] = ref->h->dma;
-		} else if (ref->pins) {
-			ref->pins--;
-			atomic_dec(&ref->h->pin);
-		}
-	}
-	/* all or nothing */
-	while (err && pin && i--) {
-		struct nvmap_ref *ref = xa_load(&client->refs, ids[i]);
-
-		ref->pins--;
-		atomic_dec(&ref->h->pin);
-	}
-	mutex_unlock(&client->lock);
-	return err;
-}
-
 static int nvmap_ioctl_pinop(struct nvmap_client *client, bool pin,
 			     struct nvmap_pin_handle __user *arg)
 {
 	struct nvmap_pin_handle op;
 	u32 on_stack[16], *ids = on_stack;
 	unsigned long out_stack[16], *addrs = out_stack;
-	int err;
+	unsigned int i;
+	int err = 0;
 
 	if (copy_from_user(&op, arg, sizeof(op)))
 		return -EFAULT;
@@ -366,18 +480,33 @@ static int nvmap_ioctl_pinop(struct nvmap_client *client, bool pin,
 		goto out;
 	}
 
-	err = nvmap_pin_ids(client, pin, ids, op.count, addrs);
-	if (err || !pin)
+	if (!pin) {
+		for (i = 0; i < op.count; i++)
+			nvmap_handle_unpin(client, ids[i]);
 		goto out;
+	}
 
-	if (op.count == 1) {
-		err = put_user(addrs[0], &arg->addr);
-	} else if (op.addr) {
-		err = copy_to_user((void __user *)op.addr, addrs,
-				   op.count * sizeof(*addrs)) ? -EFAULT : 0;
+	/* all or nothing */
+	for (i = 0; i < op.count; i++) {
+		dma_addr_t addr;
+
+		err = nvmap_handle_pin(client, ids[i], &addr);
+		if (err)
+			break;
+		addrs[i] = addr;
+	}
+	if (!err) {
+		if (op.count == 1)
+			err = put_user(addrs[0], &arg->addr);
+		else if (op.addr)
+			err = copy_to_user((void __user *)op.addr, addrs,
+					   op.count * sizeof(*addrs)) ? -EFAULT : 0;
+		if (err)
+			i = op.count;
 	}
 	if (err)
-		nvmap_pin_ids(client, false, ids, op.count, addrs);
+		while (i--)
+			nvmap_handle_unpin(client, ids[i]);
 out:
 	if (ids != on_stack)
 		kfree(ids);
@@ -488,7 +617,8 @@ static long nvmap_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case NVMAP_IOC_ALLOC:
 		return nvmap_ioctl_alloc(client, uarg);
 	case NVMAP_IOC_FREE:
-		return nvmap_ioctl_free(client, arg);
+		nvmap_handle_free(client, arg);
+		return 0;
 	case NVMAP_IOC_MMAP:
 		return nvmap_ioctl_mmap(client, uarg);
 	case NVMAP_IOC_WRITE:
@@ -538,7 +668,7 @@ static vm_fault_t nvmap_vma_fault(struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS;
 
 	return vmf_insert_pfn(vma, vmf->address & PAGE_MASK,
-			      PHYS_PFN(dma_to_phys(&nvmap_pdev->dev, vpriv->h->dma) + offs));
+			      PHYS_PFN(vpriv->h->phys + offs));
 }
 
 static const struct vm_operations_struct nvmap_vma_ops = {
@@ -566,13 +696,10 @@ static int nvmap_mmap(struct file *filp, struct vm_area_struct *vma)
 static int nvmap_open(struct inode *inode, struct file *filp)
 {
 	struct miscdevice *misc = filp->private_data;
-	struct nvmap_client *client;
+	struct nvmap_client *client = nvmap_client_create();
 
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
 	if (!client)
 		return -ENOMEM;
-	xa_init(&client->refs);
-	mutex_init(&client->lock);
 	client->super = misc == &nvmap_knvmap_dev;
 
 	filp->private_data = client;
@@ -581,14 +708,7 @@ static int nvmap_open(struct inode *inode, struct file *filp)
 
 static int nvmap_release(struct inode *inode, struct file *filp)
 {
-	struct nvmap_client *client = filp->private_data;
-	struct nvmap_ref *ref;
-	unsigned long id;
-
-	xa_for_each(&client->refs, id, ref)
-		nvmap_ref_drop(ref);
-	xa_destroy(&client->refs);
-	kfree(client);
+	nvmap_client_destroy(filp->private_data);
 	return 0;
 }
 
@@ -614,29 +734,19 @@ static struct miscdevice nvmap_knvmap_dev = {
 	.mode	= 0600,
 };
 
-int tegra_nvmap_init(void)
+int tegra_nvmap_init(struct device *dev, struct gen_pool *iram)
 {
 	int err;
 
-	nvmap_pdev = platform_device_register_simple("tegra-nvmap", -1, NULL, 0);
-	if (IS_ERR(nvmap_pdev))
-		return PTR_ERR(nvmap_pdev);
-	err = dma_coerce_mask_and_coherent(&nvmap_pdev->dev, DMA_BIT_MASK(32));
-	if (err)
-		goto err_pdev;
+	nvmap_dev = dev;
+	nvmap_iram = iram;
 
 	err = misc_register(&nvmap_user_dev);
 	if (err)
-		goto err_pdev;
+		return err;
 	err = misc_register(&nvmap_knvmap_dev);
 	if (err)
-		goto err_user;
-	return 0;
-
-err_user:
-	misc_deregister(&nvmap_user_dev);
-err_pdev:
-	platform_device_unregister(nvmap_pdev);
+		misc_deregister(&nvmap_user_dev);
 	return err;
 }
 
@@ -644,5 +754,4 @@ void tegra_nvmap_exit(void)
 {
 	misc_deregister(&nvmap_knvmap_dev);
 	misc_deregister(&nvmap_user_dev);
-	platform_device_unregister(nvmap_pdev);
 }

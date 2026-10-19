@@ -109,8 +109,30 @@ struct nvmap_cache_op {
 #define NVMAP_IOC_MAXNR		(_IOC_NR(NVMAP_IOC_GET_ID))
 
 #ifdef __KERNEL__
-int tegra_nvmap_init(void);
+struct device;
+struct gen_pool;
+struct nvmap_client;
+
+/* dev: DMA device for the allocations; iram: pool for NVMAP_HEAP_CARVEOUT_IRAM */
+int tegra_nvmap_init(struct device *dev, struct gen_pool *iram);
 void tegra_nvmap_exit(void);
+
+/*
+ * In-kernel clients (the AVP driver and the services it runs for the AVP)
+ * may reference any handle by id. The calls mirror the ioctls.
+ */
+struct nvmap_client *nvmap_client_create(void);
+void nvmap_client_destroy(struct nvmap_client *client);
+int nvmap_handle_create(struct nvmap_client *client, size_t size, u32 *id);
+int nvmap_handle_alloc(struct nvmap_client *client, u32 id,
+		       unsigned int heap_mask, size_t align, unsigned int flags);
+void nvmap_handle_free(struct nvmap_client *client, u32 id);
+int nvmap_handle_dup(struct nvmap_client *client, u32 id);
+int nvmap_handle_pin(struct nvmap_client *client, u32 id, dma_addr_t *addr);
+void nvmap_handle_unpin(struct nvmap_client *client, u32 id);
+/* bus address of an allocated handle, DMA_MAPPING_ERROR if none */
+dma_addr_t nvmap_handle_address(struct nvmap_client *client, u32 id);
+void *nvmap_handle_vaddr(struct nvmap_client *client, u32 id);
 #endif
 
 #endif

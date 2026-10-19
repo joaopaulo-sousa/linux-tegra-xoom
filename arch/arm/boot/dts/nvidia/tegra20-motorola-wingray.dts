@@ -1334,6 +1334,32 @@
     };
 
 	/* WiFi */
+	/*
+	 * AVP (the ARM7 media coprocessor), for the NVIDIA multimedia stack:
+	 * drivers/staging/tegra-avp. The firmware drives the VDE itself, so
+	 * tegra-vde has to be unbound while it runs.
+	 */
+	avp@60001000 {
+		compatible = "nvidia,tegra20-avp";
+		reg = <0x60001000 0x1000>,	/* shared semaphores: mailboxes */
+		      <0x6000f000 0x1000>,	/* exception vectors */
+		      <0x60007000 0x1000>;	/* flow controller */
+		reg-names = "sema", "evp", "flow";
+		interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;	/* mailbox from AVP */
+		interrupt-names = "mbox_from_avp_pending";
+		clocks = <&tegra_car TEGRA20_CLK_VCP>,
+			 <&tegra_car TEGRA20_CLK_BSEA>,
+			 <&tegra_car TEGRA20_CLK_VDE>;
+		clock-names = "vcp", "bsea", "vde";
+		resets = <&tegra_car 1>,	/* COP */
+			 <&tegra_car TEGRA20_CLK_VCP>,
+			 <&tegra_car TEGRA20_CLK_BSEA>,
+			 <&tegra_car TEGRA20_CLK_VDE>;
+		reset-names = "cop", "vcp", "bsea", "vde";
+		power-domains = <&pd_vde>;
+		iram = <&vde_pool>;
+	};
+
 	sdmmc2: mmc@c8000200 {
 		status = "okay";
 		
