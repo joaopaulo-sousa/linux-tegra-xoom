@@ -1351,7 +1351,14 @@
 		 * For some reason it won't run at 48MHz like downstream does
          * For now, this messy number will do (600mHz / 15)
 		 */
-        max-frequency = <46153846>;
+        /*
+		 * The BCM4329 does not do SDIO high-speed timing, so the legacy
+		 * 25 MHz limit applies: at 46 MHz the bus got the odd CRC error
+		 * (brcmf_sdio_readframes: RXHEADER FAILED: -84), after which the
+		 * firmware stopped answering until reboot. 25 MHz x 4 bits is
+		 * still more than the 802.11n 1x1 link carries.
+		 */
+        max-frequency = <25000000>;
 		keep-power-in-suspend;
         bus-width = <4>;
 		non-removable;
