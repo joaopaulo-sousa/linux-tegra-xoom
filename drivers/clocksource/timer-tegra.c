@@ -44,6 +44,7 @@
 #define TIMER10_BASE		0x90
 
 #define TIMER1_IRQ_IDX		0
+#define TIMER3_IRQ_IDX		2
 #define TIMER10_IRQ_IDX		10
 
 #define TIMER_1MHz		1000000
@@ -208,20 +209,16 @@ static struct clocksource suspend_rtc_clocksource = {
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS | CLOCK_SOURCE_SUSPEND_NONSTOP,
 };
 
+/*
+ * Tegra20 has two CPUs and four timers. TIMER1 and TIMER2 belong to the AVP
+ * (the media coprocessor): its firmware programs them, so the CPUs take
+ * TIMER3 and TIMER4, as the NVIDIA kernels did. A CPU sharing a timer with
+ * a running AVP stops getting its ticks.
+ */
 static inline unsigned int tegra_base_for_cpu(int cpu, bool tegra20)
 {
-	if (tegra20) {
-		switch (cpu) {
-		case 0:
-			return TIMER1_BASE;
-		case 1:
-			return TIMER2_BASE;
-		case 2:
-			return TIMER3_BASE;
-		default:
-			return TIMER4_BASE;
-		}
-	}
+	if (tegra20)
+		return cpu ? TIMER4_BASE : TIMER3_BASE;
 
 	return TIMER10_BASE + cpu * 8;
 }
@@ -229,7 +226,7 @@ static inline unsigned int tegra_base_for_cpu(int cpu, bool tegra20)
 static inline unsigned int tegra_irq_idx_for_cpu(int cpu, bool tegra20)
 {
 	if (tegra20)
-		return TIMER1_IRQ_IDX + cpu;
+		return TIMER3_IRQ_IDX + cpu;
 
 	return TIMER10_IRQ_IDX + cpu;
 }
