@@ -133,6 +133,8 @@ void nvmap_handle_unpin(struct nvmap_client *client, u32 id);
 /* bus address of an allocated handle, DMA_MAPPING_ERROR if none */
 dma_addr_t nvmap_handle_address(struct nvmap_client *client, u32 id);
 void *nvmap_handle_vaddr(struct nvmap_client *client, u32 id);
+/* let every client reference the handle by id, as NVMAP_IOC_GET_ID does */
+int nvmap_handle_share(struct nvmap_client *client, u32 id);
 #endif
 
 #endif

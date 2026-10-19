@@ -355,6 +355,18 @@ void *nvmap_handle_vaddr(struct nvmap_client *client, u32 id)
 	return vaddr;
 }
 
+int nvmap_handle_share(struct nvmap_client *client, u32 id)
+{
+	struct nvmap_handle *h = nvmap_client_handle(client, id);
+
+	if (!h)
+		return -EPERM;
+	if (h->owner == client)
+		h->global = true;
+	nvmap_handle_put(h);
+	return 0;
+}
+
 static int nvmap_ioctl_create(struct nvmap_client *client, unsigned int cmd,
 			      void __user *arg)
 {

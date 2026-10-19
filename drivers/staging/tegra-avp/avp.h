@@ -32,4 +32,12 @@ void avp_svc_stop(struct avp_svc_info *svc);
 int tegra_avp_driver_register(void);
 void tegra_avp_driver_unregister(void);
 
+/* in-kernel users of the AVP; lib->args is a kernel pointer here */
+struct avp_info;
+struct tegra_avp_lib;
+struct avp_info *tegra_avp_get(void);
+void tegra_avp_put(struct avp_info *avp);
+int tegra_avp_load_lib(struct avp_info *avp, struct tegra_avp_lib *lib);
+int tegra_avp_unload_lib(struct avp_info *avp, u32 handle);
+
 #endif

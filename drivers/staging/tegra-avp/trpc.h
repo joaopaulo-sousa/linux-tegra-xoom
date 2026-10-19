@@ -78,6 +78,11 @@ int trpc_node_register(struct trpc_node *node);
 
 /* component init/exit, called in order by main.c (one module) */
 int tegra_rpc_init(void);
+/* ports of in-kernel clients on the local node */
+struct trpc_endpoint *rpc_local_create(const char *name,
+				       struct trpc_ep_ops *ops, void *priv);
+int rpc_local_send(struct trpc_endpoint *ep, void *buf, size_t len);
+int rpc_local_recv(struct trpc_endpoint *ep, void *buf, size_t max);
 void tegra_rpc_exit(void);
 int rpc_local_init(void);
 void rpc_local_exit(void);

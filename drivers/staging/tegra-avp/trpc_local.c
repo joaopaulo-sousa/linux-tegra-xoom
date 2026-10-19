@@ -138,6 +138,31 @@ static int _validate_port_name(const char *name)
 	return 0;
 }
 
+struct trpc_endpoint *rpc_local_create(const char *name,
+				       struct trpc_ep_ops *ops, void *priv)
+{
+	int ret = _validate_port_name(name);
+
+	if (ret)
+		return ERR_PTR(ret);
+	return trpc_create(&rpc_node, name, ops, priv);
+}
+
+int rpc_local_send(struct trpc_endpoint *ep, void *buf, size_t len)
+{
+	if (len > TEGRA_RPC_MAX_MSG_LEN)
+		return -EINVAL;
+	return trpc_send_msg(&rpc_node, ep, buf, len, GFP_KERNEL);
+}
+
+/* does not wait: 0 if nothing is queued */
+int rpc_local_recv(struct trpc_endpoint *ep, void *buf, size_t max)
+{
+	if (max > TEGRA_RPC_MAX_MSG_LEN)
+		return -EINVAL;
+	return trpc_recv_msg(&rpc_node, ep, buf, max, 0);
+}
+
 static long local_rpc_ioctl(struct file *file, unsigned int cmd,
 			    unsigned long arg)
 {
