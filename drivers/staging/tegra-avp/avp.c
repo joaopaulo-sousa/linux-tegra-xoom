@@ -92,6 +92,11 @@ module_param_named(debug_mask, avp_debug_mask, uint, 0644);
 #define MBOX_MSG_READ_INT_EN		(1 << 30)
 #define MBOX_MSG_VALID			(1 << 29)
 
+/* the AVP answers library requests in well under a second; without a
+ * limit a request it never answers (e.g. a detach of a codec library
+ * that was not set up) blocks the caller for good */
+#define AVP_REPLY_TIMEOUT_MS		5000
+
 #define AVP_MSG_MAX_CMD_LEN		16
 #define AVP_MSG_AREA_SIZE	(AVP_MSG_MAX_CMD_LEN + TEGRA_RPC_MAX_MSG_LEN)
 
@@ -1140,7 +1145,7 @@ static int _load_lib(struct avp_info *avp, struct tegra_avp_lib *lib)
 		goto err_send_msg;
 
 	ret = trpc_recv_msg(avp->rpc_node, avp->avp_ep, &resp,
-				 sizeof(resp), -1);
+				 sizeof(resp), AVP_REPLY_TIMEOUT_MS);
 	if (ret != sizeof(resp)) {
 		pr_err("avp_lib: Couldn't get lib load reply (%d)\n", ret);
 		goto err_recv_msg;
@@ -1193,7 +1198,7 @@ static int send_unload_lib_msg(struct avp_info *avp, u32 handle,
 	}
 
 	ret = trpc_recv_msg(avp->rpc_node, avp->avp_ep, &resp,
-				 sizeof(resp), -1);
+				 sizeof(resp), AVP_REPLY_TIMEOUT_MS);
 	if (ret != sizeof(resp)) {
 		pr_err("avp_lib: Couldn't get unload reply for '%s' (%d)\n",
 		       name, ret);
