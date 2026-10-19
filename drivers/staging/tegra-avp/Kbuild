@@ -1,0 +1,4 @@
+# Tegra20 AVP multimedia offload (ported from the NVIDIA/Android 2.6.39 tree)
+ccflags-y += -I$(src)
+obj-$(CONFIG_TEGRA_AVP_STAGING) += tegra-avp.o
+tegra-avp-y := main.o tegra_rpc.o trpc_local.o trpc_sema.o
