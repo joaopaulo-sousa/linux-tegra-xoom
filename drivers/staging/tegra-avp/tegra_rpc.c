@@ -71,7 +71,7 @@ enum {
 };
 
 static u32 trpc_debug_mask = 0;
-module_param_named(debug_mask, trpc_debug_mask, uint, S_IWUSR | S_IRUGO);
+module_param_named(rpc_debug_mask, trpc_debug_mask, uint, 0644);
 
 #define DBG(flag, args...) \
 	do { if (trpc_debug_mask & (flag)) pr_info(args); } while (0)

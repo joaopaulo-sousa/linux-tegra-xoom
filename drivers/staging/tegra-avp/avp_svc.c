@@ -37,7 +37,7 @@ enum {
 };
 
 static u32 debug_mask = 0;
-module_param_named(debug_mask, debug_mask, uint, S_IWUSR | S_IRUGO);
+module_param_named(svc_debug_mask, debug_mask, uint, 0644);
 
 #define DBG(flag, args...) \
 	do { if (unlikely(debug_mask & (flag))) pr_info(args); } while (0)
