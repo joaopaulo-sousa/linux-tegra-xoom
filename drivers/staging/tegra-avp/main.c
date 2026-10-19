@@ -5,11 +5,13 @@
  * local RPC device (/dev/tegra_rpc), the fd based semaphores
  * (/dev/tegra_sema), the memory handles (/dev/nvmap, /dev/knvmap) and the
  * AVP itself (/dev/tegra_avp: its kernel, the codec libraries it loads, the
- * services it asks of the CPU), which the NVIDIA multimedia libraries use.
+ * services it asks of the CPU), and the host1x control node the libraries
+ * also expect (/dev/nvhost-ctrl), which the NVIDIA multimedia libraries use.
  */
 #include <linux/module.h>
 
 #include "avp.h"
+#include "nvhost_ctrl.h"
 #include "trpc.h"
 
 static int __init tegra_avp_module_init(void)
@@ -24,6 +26,10 @@ static int __init tegra_avp_module_init(void)
 	if (ret)
 		goto err_local;
 
+	ret = tegra_nvhost_ctrl_init();
+	if (ret)
+		goto err_nvhost;
+
 	/* the AVP device brings up nvmap */
 	ret = tegra_avp_driver_register();
 	if (ret)
@@ -32,6 +38,8 @@ static int __init tegra_avp_module_init(void)
 	return 0;
 
 err_avp:
+	tegra_nvhost_ctrl_exit();
+err_nvhost:
 	rpc_local_exit();
 err_local:
 	tegra_rpc_exit();
@@ -41,6 +49,7 @@ err_local:
 static void __exit tegra_avp_module_exit(void)
 {
 	tegra_avp_driver_unregister();
+	tegra_nvhost_ctrl_exit();
 	rpc_local_exit();
 	tegra_rpc_exit();
 }
