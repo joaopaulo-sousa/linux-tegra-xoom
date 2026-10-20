@@ -56,6 +56,17 @@ static void tegra_bo_put(struct host1x_bo *bo)
 	drm_gem_object_put(&obj->gem);
 }
 
+/*
+ * Buffers from the DMA API are write-combined (dma_alloc_wc), with no
+ * cacheable alias on ARM, so mapping them for a device needs no CPU cache
+ * maintenance; cleaning the whole buffer on every pin cost a display client
+ * a large part of its CPU time (the display pins each frame it scans out).
+ */
+static unsigned long tegra_bo_dma_attrs(struct tegra_bo *obj)
+{
+	return obj->pages ? 0 : DMA_ATTR_SKIP_CPU_SYNC;
+}
+
 static struct host1x_bo_mapping *tegra_bo_pin(struct device *dev, struct host1x_bo *bo,
 					      enum dma_data_direction direction)
 {
@@ -129,7 +140,7 @@ static struct host1x_bo_mapping *tegra_bo_pin(struct device *dev, struct host1x_
 			goto free;
 	}
 
-	err = dma_map_sgtable(dev, map->sgt, direction, 0);
+	err = dma_map_sgtable(dev, map->sgt, direction, tegra_bo_dma_attrs(obj));
 	if (err)
 		goto free_sgt;
 
@@ -165,7 +176,8 @@ static void tegra_bo_unpin(struct host1x_bo_mapping *map)
 						  map->direction);
 		dma_buf_detach(map->attach->dmabuf, map->attach);
 	} else {
-		dma_unmap_sgtable(map->dev, map->sgt, map->direction, 0);
+		dma_unmap_sgtable(map->dev, map->sgt, map->direction,
+				  tegra_bo_dma_attrs(host1x_to_tegra_bo(map->bo)));
 		sg_free_table(map->sgt);
 		kfree(map->sgt);
 	}
