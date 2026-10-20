@@ -287,6 +287,53 @@ static void submit_add_resv_fences(struct tegra_drm_context *context,
 	}
 }
 
+/*
+ * Implicit synchronization with other processes: before a job runs, wait for
+ * the jobs of others still writing the buffers it uses, or for every user of
+ * the buffers it writes, e.g. a compositor sampling a client's frame. Fences
+ * of the caller's own syncpoints are left to it: it orders its own jobs on
+ * the engines (host1x waits) without blocking here.
+ */
+static int submit_wait_resv_fences(struct tegra_drm_context *context,
+				   struct xarray *syncpoints,
+				   struct tegra_drm_submit_data *job_data)
+{
+	u32 i;
+
+	for (i = 0; i < job_data->num_used_mappings; i++) {
+		struct tegra_drm_used_mapping *used = &job_data->used_mappings[i];
+		struct tegra_bo *bo = host1x_to_tegra_bo(used->mapping->bo);
+		enum dma_resv_usage usage = DMA_RESV_USAGE_WRITE;
+		struct dma_resv_iter cursor;
+		struct dma_fence *fence;
+		long ret = 1;
+
+		if (used->flags & DRM_TEGRA_SUBMIT_BUF_WRITE)
+			usage = DMA_RESV_USAGE_READ;
+
+		dma_resv_iter_begin(&cursor, bo->gem.resv, usage);
+		dma_resv_for_each_fence_unlocked(&cursor, fence) {
+			struct host1x_syncpt *sp = host1x_fence_syncpt(fence);
+
+			if (sp && xa_load(syncpoints, host1x_syncpt_id(sp)) == sp)
+				continue;
+			ret = dma_fence_wait_timeout(fence, true, msecs_to_jiffies(10000));
+			if (ret <= 0)
+				break;
+		}
+		dma_resv_iter_end(&cursor);
+
+		if (ret == 0) {
+			SUBMIT_ERR(context, "wait for an implicit fence timed out");
+			return -ETIMEDOUT;
+		}
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int submit_process_bufs(struct tegra_drm_context *context, struct gather_bo *bo,
 			       struct drm_tegra_channel_submit *args,
 			       struct tegra_drm_submit_data *job_data)
@@ -603,6 +650,10 @@ int tegra_drm_ioctl_channel_submit(struct drm_device *drm, void *data,
 
 	/* Get data buffer mappings and do relocation patching. */
 	err = submit_process_bufs(context, bo, args, job_data);
+	if (err)
+		goto free_job_data;
+
+	err = submit_wait_resv_fences(context, &fpriv->syncpoints, job_data);
 	if (err)
 		goto free_job_data;
 

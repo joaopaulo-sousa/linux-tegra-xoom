@@ -144,6 +144,15 @@ struct dma_fence *host1x_fence_create(struct host1x_syncpt *sp, u32 threshold,
 }
 EXPORT_SYMBOL(host1x_fence_create);
 
+/* The syncpoint of a host1x fence, NULL for other fences */
+struct host1x_syncpt *host1x_fence_syncpt(struct dma_fence *f)
+{
+	if (f->ops != &host1x_syncpt_fence_ops)
+		return NULL;
+	return to_host1x_fence(f)->sp;
+}
+EXPORT_SYMBOL(host1x_fence_syncpt);
+
 void host1x_fence_cancel(struct dma_fence *f)
 {
 	struct host1x_syncpt_fence *sf = to_host1x_fence(f);
