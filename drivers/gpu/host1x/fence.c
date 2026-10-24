@@ -66,10 +66,23 @@ static bool host1x_syncpt_fence_enable_signaling(struct dma_fence *f)
 	return true;
 }
 
+/*
+ * Whether the syncpoint has reached the threshold, without waiting for an
+ * interrupt: reservation objects drop the fences that have signalled when
+ * fences are added, and nobody enables signalling on most of them.
+ */
+static bool host1x_syncpt_fence_signaled(struct dma_fence *f)
+{
+	struct host1x_syncpt_fence *sf = to_host1x_fence(f);
+
+	return host1x_syncpt_is_expired(sf->sp, sf->threshold);
+}
+
 static const struct dma_fence_ops host1x_syncpt_fence_ops = {
 	.get_driver_name = host1x_syncpt_fence_get_driver_name,
 	.get_timeline_name = host1x_syncpt_fence_get_timeline_name,
 	.enable_signaling = host1x_syncpt_fence_enable_signaling,
+	.signaled = host1x_syncpt_fence_signaled,
 };
 
 void host1x_fence_signal(struct host1x_syncpt_fence *f)
@@ -135,8 +148,9 @@ struct dma_fence *host1x_fence_create(struct host1x_syncpt *sp, u32 threshold,
 	fence->threshold = threshold;
 	fence->timeout = timeout;
 
+	/* one context per syncpoint: a later fence replaces an earlier one */
 	dma_fence_init(&fence->base, &host1x_syncpt_fence_ops, &sp->fences.lock,
-		       dma_fence_context_alloc(1), 0);
+		       sp->fence_context, threshold);
 
 	INIT_DELAYED_WORK(&fence->timeout_work, do_fence_timeout);
 

@@ -282,6 +282,7 @@ int host1x_syncpt_init(struct host1x *host)
 	struct host1x_syncpt_base *bases;
 	struct host1x_syncpt *syncpt;
 	unsigned int i;
+	u64 context;
 
 	syncpt = devm_kcalloc(host->dev, host->info->nb_pts, sizeof(*syncpt),
 			      GFP_KERNEL);
@@ -293,9 +294,11 @@ int host1x_syncpt_init(struct host1x *host)
 	if (!bases)
 		return -ENOMEM;
 
+	context = dma_fence_context_alloc(host->info->nb_pts);
 	for (i = 0; i < host->info->nb_pts; i++) {
 		syncpt[i].id = i;
 		syncpt[i].host = host;
+		syncpt[i].fence_context = context + i;
 	}
 
 	for (i = 0; i < host->info->nb_bases; i++)

@@ -43,6 +43,12 @@ struct host1x_syncpt {
 	struct host1x_fence_list fences;
 
 	/*
+	 * dma_fence context of the syncpoint's fences: they signal in the
+	 * order of their thresholds, which are their seqnos
+	 */
+	u64 fence_context;
+
+	/*
 	 * If a submission incrementing this syncpoint fails, lock it so that
 	 * further submission cannot be made until application has handled the
 	 * failure.
